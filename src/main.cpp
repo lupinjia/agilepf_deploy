@@ -36,22 +36,30 @@ int main(int argc, char const *argv[])
 
     /***** Controller *****/
     BasicUserController* user_ctrl;
-    std::string config_file_dir = param / "rl_params.yaml";
-    user_ctrl = new RLController(config_file_dir);
+    if(argv[1] == std::string("depth"))
+    {
+        std::string config_file_dir = param / "depth_params.yaml";
+        user_ctrl = new DepthController(config_file_dir);
+    }
+    else if(argv[1] == std::string("ee")) // ee
+    {
+        std::string config_file_dir = param / "ee_params.yaml";
+        user_ctrl = new EEController(config_file_dir);
+    }
     
     int domain_id;
     std::string interface_name;
-    if(argc < 2) // local loopback
+    if(argc > 2) // use specified interface name
+    {
+        domain_id = 0;
+        interface_name = argv[2];
+    }
+    else // local loopback
     {
         domain_id = 1;
         interface_name = "lo";
     }
-    else
-    {
-        domain_id = 0;
-        interface_name = argv[1];
-    }
-    RobotController *robot_controller = new RobotController(log_file_name, 
+    RobotController *robot_controller = new RobotController(log_folder, 
                                     user_ctrl, domain_id, interface_name);
     // load parameter from .json file
     robot_controller->loadParam();
@@ -59,8 +67,8 @@ int main(int argc, char const *argv[])
     robot_controller->loadPolicy();
 
     // output information
-    std::cout << "WARNING: Make sure the robot is hung up or lying on the ground." << std::endl
-            << "Press Enter to continue..." << std::endl;
+    spdlog::info("WARNING: Make sure the robot is hung up or lying on the ground.");
+    spdlog::info("Press Enter to continue...");
     std::cin.ignore();
 
     // 开启外设通信

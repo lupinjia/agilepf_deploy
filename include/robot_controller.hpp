@@ -2,7 +2,6 @@
 #define ROBOT_CONTROLLER_HPP
 
 #include <math.h>
-#include <iostream>
 #include <stdio.h>
 #include <stdint.h>
 #include <vector>
@@ -17,14 +16,17 @@
 #include <sstream>
 #include <sched.h>
 
+#include "spdlog/sinks/basic_file_sink.h"
 #include "common/mathTools.h"
-#include "common/periodic_task.hpp"
-#include <idl/agilepf/LowState/LowState.hpp>
-#include <idl/agilepf/LowState/LowStatePubSubTypes.hpp>
-#include <dds/dds_publisher.hpp>
-#include <dds/dds_subscriber.hpp>
-#include <idl/agilepf/LowCmd/LowCmd.hpp>
-#include <idl/agilepf/LowCmd/LowCmdPubSubTypes.hpp>
+#include <legged_sdk/common/periodic_task.hpp>
+#include <legged_sdk/idl/agilepf/LowState/LowState.hpp>
+#include <legged_sdk/idl/agilepf/LowState/LowStatePubSubTypes.hpp>
+#include <legged_sdk/idl/agilepf/DepthImage/DepthImage.hpp>
+#include <legged_sdk/idl/agilepf/DepthImage/DepthImagePubSubTypes.hpp>
+#include <legged_sdk/dds/dds_publisher.hpp>
+#include <legged_sdk/dds/dds_subscriber.hpp>
+#include <legged_sdk/idl/agilepf/LowCmd/LowCmd.hpp>
+#include <legged_sdk/idl/agilepf/LowCmd/LowCmdPubSubTypes.hpp>
 
 #include "state_machine.hpp"
 #include "robot_interface.hpp"
@@ -37,6 +39,7 @@ using namespace legged::common;
 
 #define TOPIC_LOWCMD "rt/lowcmd"
 #define TOPIC_LOWSTATE "rt/lowstate"
+#define TOPIC_DEPTHIMAGE "rt/depthimage"
 
 // RobotController为一个框架, 将有限状态机整体的逻辑具象化为一个类
 class RobotController
@@ -44,12 +47,12 @@ class RobotController
 public:
     RobotController(BasicUserController* ctrl) : ctrl(ctrl) {}
 
-    RobotController(fs::path &log_file_name, BasicUserController* user_ctrl,
+    RobotController(fs::path &log_folder, BasicUserController* user_ctrl,
                     int domain_id, std::string interface_name) :
         ctrl(user_ctrl), domain_id_(domain_id), interface_name_(interface_name)
     {
         // set log file
-        log_file = std::ofstream(log_file_name);
+        robot_state_log_file = std::ofstream(log_folder / "robot_state_log.csv");
         std::stringstream header;
         header << "compute_time,";
         header << "state,";
@@ -68,7 +71,11 @@ public:
         // header << "jvel_des0,jvel_des1,jvel_des2,jvel_des3,jvel_des4,jvel_des5,"; // jvel_des
         // header << "tau0,tau1,tau2,tau3,tau4,tau5,"; // tau_ff
         header << std::endl;
-        log_file << header.str();
+        robot_state_log_file << header.str();
+
+        // initialize spdlog logger
+        message_logger = spdlog::basic_logger_mt("message_logger", log_folder / "message_log.txt");
+        // spdlog::set_default_logger(logger);
 
         initLowCmd();
     }
@@ -85,14 +92,22 @@ public:
 
     void initDDSPubSub()
     {
+        // init time variables
+        low_state_last_time = std::chrono::high_resolution_clock::now();
+        depth_image_last_time = std::chrono::high_resolution_clock::now();
+
+        // init DDS publisher and subscriber
         low_cmd_publisher = std::make_shared<DDSPublisher<legged::idl::agilepf::LowCmd,
                         legged::idl::agilepf::LowCmdPubSubType>>(domain_id_, interface_name_, TOPIC_LOWCMD, 2000.0f);
         low_state_subscriber = std::make_shared<DDSSubscriber<legged::idl::agilepf::LowState,
                          legged::idl::agilepf::LowStatePubSubType>>(domain_id_, interface_name_, TOPIC_LOWSTATE, 
                             std::bind(&RobotController::lowStateMessageHandler, this, std::placeholders::_1), 2000.0f);
-        
+        depth_image_subscriber = std::make_shared<DDSSubscriber<legged::idl::agilepf::DepthImage,
+                         legged::idl::agilepf::DepthImagePubSubType>>(domain_id_, interface_name_, TOPIC_DEPTHIMAGE, 
+                            std::bind(&RobotController::depthImageMessageHandler, this, std::placeholders::_1), 100000.0f);
         low_cmd_publisher->init();
         low_state_subscriber->init();
+        depth_image_subscriber->init();
     }
 
     void startControl()
@@ -126,10 +141,13 @@ protected:
                         legged::idl::agilepf::LowCmdPubSubType> low_cmd_publisher;
     DDSSubscriberPtr<legged::idl::agilepf::LowState,
                          legged::idl::agilepf::LowStatePubSubType> low_state_subscriber;
+    DDSSubscriberPtr<legged::idl::agilepf::DepthImage,
+                         legged::idl::agilepf::DepthImagePubSubType> depth_image_subscriber;
     PeriodicTaskPtr low_cmd_publish_task, control_task;
 
     legged::idl::agilepf::LowCmd low_cmd;
     legged::idl::agilepf::LowState low_state;
+    legged::idl::agilepf::DepthImage depth_image;
 
     SimpleStateMachine state_machine;
     BasicUserController* ctrl;
@@ -137,12 +155,18 @@ protected:
 
     std::mutex state_mutex, cmd_mutex;
 
-    std::ofstream log_file;
+    std::ofstream robot_state_log_file;
+    std::shared_ptr<spdlog::logger> message_logger;
 
     Gamepad gamepad;
 
     uint64_t ctrl_dt_micro_sec = 2000;
 
+    // time variables
+    std::chrono::high_resolution_clock::time_point low_state_last_time;
+    std::vector<float> low_state_period;
+    std::chrono::high_resolution_clock::time_point depth_image_last_time;
+    std::vector<float> depth_image_period;
     std::vector<float> compute_time;
 
     int domain_id_;
@@ -153,10 +177,68 @@ private:
     // 500Hz
     void lowStateMessageHandler(const void* msg)
     {
+        #ifdef PRINT_DEBUG
+            // calculate time between two successive messages
+            auto cur_time = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(cur_time - low_state_last_time).count();
+            low_state_last_time = cur_time;
+            low_state_period.push_back(duration / 1000.0f); // ms
+            if (low_state_period.size() == 500)
+            {
+                float sum = 0;
+                float min = low_state_period[0];
+                float max = 0;
+                for (auto &t : low_state_period)
+                {
+                    sum += t;
+                    if( t < min ) min = t;
+                    if( t > max ) max = t;
+                }
+                message_logger->info("low_state subscriber Performance: mean: {} ms; max: {} ms; min: {} ms.",
+                            sum / 500, max, min);
+                message_logger->flush();
+                low_state_period.clear();
+            }
+        #endif
+
         low_state = *(legged::idl::agilepf::LowState*)msg;
         {
             std::lock_guard<std::mutex> lock(state_mutex);
             robot_interface.updateLowState(low_state);
+        }
+    }
+
+    // 10Hz
+    void depthImageMessageHandler(const void* msg)
+    {
+        #ifdef PRINT_DEBUG
+            // calculate time between two successive messages
+            auto cur_time = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(cur_time - depth_image_last_time).count();
+            depth_image_last_time = cur_time;
+            depth_image_period.push_back(duration / 1000.0f); // ms
+            if (depth_image_period.size() == 10)
+            {
+                float sum = 0;
+                float min = depth_image_period[0];
+                float max = 0;
+                for (auto &t : depth_image_period)
+                {
+                    sum += t;
+                    if( t < min ) min = t;
+                    if( t > max ) max = t;
+                }
+                message_logger->info("depth_image subscriber Performance: mean: {} ms; max: {} ms; min: {} ms.",
+                            sum / 10, max, min);
+                message_logger->flush();
+                depth_image_period.clear();
+            }
+        #endif
+        depth_image = *(legged::idl::agilepf::DepthImage*)msg;
+        // process depth image if needed
+        {
+            std::lock_guard<std::mutex> lock(state_mutex);
+            robot_interface.updateDepthImage(depth_image);
         }
     }
 
@@ -289,30 +371,29 @@ private:
             {
                 sum += t;
             }
-            std::cout << "control thread Performance: mean: " << sum / 50
-                      << " ms; max: " << *std::max_element(compute_time.begin(), compute_time.end())
-                      << " ms; min: " << *std::min_element(compute_time.begin(), compute_time.end())
-                      << "ms." << std::endl;
-
+            spdlog::info("control thread Performance: mean: {} ms; max: {} ms; min: {} ms.",
+                         sum / 50,
+                         *std::max_element(compute_time.begin(), compute_time.end()),
+                         *std::min_element(compute_time.begin(), compute_time.end()));
             compute_time.clear();
-
-            std::cout << "Current State: " << state_machine.state_name[static_cast<size_t>(state_machine.state)] << std::endl;
+            
+            spdlog::info("Current State: {}", state_machine.state_name[static_cast<size_t>(state_machine.state)]);
         }
     }
 
     void writeLog(float computation_time)
     {
-        if (log_file.is_open())
+        if (robot_state_log_file.is_open())
         {
-            log_file << computation_time << ",";
-            log_file << static_cast<size_t>(state_machine.state) << ",";
+            robot_state_log_file << computation_time << ",";
+            robot_state_log_file << static_cast<size_t>(state_machine.state) << ",";
             auto log = ctrl->getLog();
             for (const auto &v : log)
             {
-                log_file << v << ",";
+                robot_state_log_file << v << ",";
             }
 
-            log_file << std::endl;
+            robot_state_log_file << std::endl;
         }
     }
 
@@ -396,11 +477,11 @@ private:
 
     bool CheckTermination()
     {
-        // if (robot_interface.projected_gravity.at(2) > -0.5)
-        // {
-        //     std::cout << "Termination: projected_gravity.z = " << robot_interface.projected_gravity.at(2) << std::endl;
-        //     return true;
-        // }
+        if (robot_interface.projected_gravity.at(2) > -0.2)
+        {
+            spdlog::info("Termination: projected_gravity.z = {}", robot_interface.projected_gravity.at(2));
+            return true;
+        }
         return false;
     }
 };
