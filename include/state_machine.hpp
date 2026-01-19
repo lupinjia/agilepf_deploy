@@ -8,22 +8,25 @@ enum class STATES
   DAMPING = 0,
   STAND = 1,
   CTRL = 2,
-  TEST = 3
+  TEST = 3,
+  ZERO_TORQUE = 4
 };
 
 class SimpleStateMachine
 {
 public:
 
-  SimpleStateMachine() : state(STATES::DAMPING) {}
+  SimpleStateMachine() : state(STATES::ZERO_TORQUE) {
+    state_name = {"DAMPING", "STAND", "CTRL", "TEST", "ZERO_TORQUE"};
+  }
 
   /**
-   * @brief  stop control, set state to damping
+   * @brief  set state to damping
    * 
    * @return true 
    * @return false 
    */
-  bool stop()
+  bool damp()
   {
     state = STATES::DAMPING;
     return true;
@@ -45,13 +48,15 @@ public:
 
   bool ctrl()
   {
-    if(state == STATES::STAND || state == STATES::DAMPING)
+    // agilepf can enter CTRL state from DAMPING state directly
+    if(state == STATES::DAMPING)
     {
       state = STATES::CTRL;
       return true;
     }
-    else // only from STAND can one enter CTRL state
+    else // only from DAMPING can one enter CTRL state
     {
+      spdlog::warn("Cannot enter CTRL state from current state!");
       return false;
     }
   }
@@ -69,6 +74,12 @@ public:
     }
   }
 
+  bool zeroTorque()
+  {
+    state = STATES::ZERO_TORQUE;
+    return true;
+  }
+
   void standing(BasicUserController &ctrl)
   {
     // calc percent
@@ -83,6 +94,7 @@ public:
   }
 
   STATES state;
+  std::vector<std::string> state_name;
 
 protected:
   int standing_count = 0;       // start counting after entering STATES::STAND, for linear interpolation

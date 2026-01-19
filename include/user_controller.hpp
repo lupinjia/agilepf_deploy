@@ -196,6 +196,19 @@ class BasicUserController
 
     void reset(BasicRobotInterface &robot_interface)
     {
+        // prepare history buffers
+        single_step_obs.resize(num_single_obs);
+        single_step_obs.clear();
+        for(int i = 0; i < num_single_obs; ++i)
+        {
+            single_step_obs.push_back(0.0);
+        }
+        history_obs.resize(frame_stack);
+        for(int i = 0; i < frame_stack; ++i)
+        {
+            history_obs.at(i).resize(num_single_obs);
+            history_obs.at(i) = single_step_obs;
+        }
         jpos_des = stand_pos;
         // reset params
         cmd.fill(0.0);

@@ -102,7 +102,7 @@ public:
 
         // prepare for start
         spdlog::info("Start!");
-        damping();
+        zeroTorque();
         ctrl_dt_micro_sec = static_cast<uint64_t>(ctrl->dt * 1000000); // 0.02s, 50Hz
         // control thread: 20000us(20ms), 50Hz; running on CPU3
         control_task = createPeriodicTask("control_thread", ctrl_dt_micro_sec, 
@@ -215,7 +215,6 @@ private:
         }
         if(gamepad.A.on_press)
         {
-            std::cout << "Switch to CTRL state." << std::endl;
             if(state_machine.ctrl())
             {
                 ctrlCallback();
@@ -223,7 +222,11 @@ private:
         }
         if(gamepad.Y.on_press)
         {
-            state_machine.stop();
+            state_machine.damp();
+        }
+        if(gamepad.X.on_press)
+        {
+            state_machine.zeroTorque();
         }
     }
 
@@ -252,12 +255,16 @@ private:
         {
             damping();
         }
+        if(state_machine.state == STATES::ZERO_TORQUE)
+        {
+            zeroTorque();
+        }
         if(state_machine.state == STATES::CTRL)
         {
             userControlStep(true); // send command
             if (CheckTermination())
             {
-                state_machine.stop();
+                state_machine.damp();
                 damping();
             }
         }
@@ -289,7 +296,7 @@ private:
 
             compute_time.clear();
 
-            std::cout << "Current State: " << static_cast<size_t>(state_machine.state) << std::endl;
+            std::cout << "Current State: " << state_machine.state_name[static_cast<size_t>(state_machine.state)] << std::endl;
         }
     }
 
@@ -352,6 +359,15 @@ private:
         robot_interface.jvel_des.fill(0.);
         robot_interface.kp.fill(0.);
         robot_interface.kd.fill(kd);
+        robot_interface.tau_ff.fill(0.);
+    }
+
+    void zeroTorque()
+    {
+        robot_interface.jpos_des.fill(0.);
+        robot_interface.jvel_des.fill(0.);
+        robot_interface.kp.fill(0.);
+        robot_interface.kd.fill(0.);
         robot_interface.tau_ff.fill(0.);
     }
 
