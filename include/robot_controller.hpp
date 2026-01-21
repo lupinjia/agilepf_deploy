@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <sstream>
 #include <sched.h>
+#include <typeinfo>
 
 #include "spdlog/sinks/basic_file_sink.h"
 #include "common/mathTools.h"
@@ -51,6 +52,16 @@ public:
                     int domain_id, std::string interface_name) :
         ctrl(user_ctrl), domain_id_(domain_id), interface_name_(interface_name)
     {
+        if (typeid(*ctrl) == typeid(EEController))
+        {
+            spdlog::info("Using EEController as user controller.");
+            enable_depth_comm = false; // ee controller does not need depth image communication
+        }
+        else if(typeid(*ctrl) == typeid(DepthController))
+        {
+            spdlog::info("Using DepthController as user controller.");
+            enable_depth_comm = true; // depth controller needs depth image communication
+        }
         // set log file
         robot_state_log_file = std::ofstream(log_folder / "robot_state_log.csv");
         std::stringstream header;
@@ -102,12 +113,16 @@ public:
         low_state_subscriber = std::make_shared<DDSSubscriber<legged::idl::agilepf::LowState,
                          legged::idl::agilepf::LowStatePubSubType>>(domain_id_, interface_name_, TOPIC_LOWSTATE, 
                             std::bind(&RobotController::lowStateMessageHandler, this, std::placeholders::_1), 2000.0f);
-        depth_image_subscriber = std::make_shared<DDSSubscriber<legged::idl::agilepf::DepthImage,
-                         legged::idl::agilepf::DepthImagePubSubType>>(domain_id_, interface_name_, TOPIC_DEPTHIMAGE, 
-                            std::bind(&RobotController::depthImageMessageHandler, this, std::placeholders::_1), 100000.0f);
         low_cmd_publisher->init();
         low_state_subscriber->init();
-        depth_image_subscriber->init();
+
+        if(enable_depth_comm)
+        {
+            depth_image_subscriber = std::make_shared<DDSSubscriber<legged::idl::agilepf::DepthImage,
+                         legged::idl::agilepf::DepthImagePubSubType>>(domain_id_, interface_name_, TOPIC_DEPTHIMAGE, 
+                            std::bind(&RobotController::depthImageMessageHandler, this, std::placeholders::_1), 100000.0f);
+            depth_image_subscriber->init();
+        }
     }
 
     void startControl()
@@ -122,7 +137,7 @@ public:
         // control thread: 20000us(20ms), 50Hz; running on CPU3
         control_task = createPeriodicTask("control_thread", ctrl_dt_micro_sec, 
             std::bind(&RobotController::controlStep, this),
-            -1, SCHED_FIFO, 90);
+            3, SCHED_FIFO, 90);
 
         // Start the lowlevel command thread
         std::this_thread::sleep_for(duration);
@@ -148,6 +163,7 @@ protected:
     legged::idl::agilepf::LowCmd low_cmd;
     legged::idl::agilepf::LowState low_state;
     legged::idl::agilepf::DepthImage depth_image;
+    bool enable_depth_comm;
 
     SimpleStateMachine state_machine;
     BasicUserController* ctrl;
@@ -165,6 +181,8 @@ protected:
     // time variables
     std::chrono::high_resolution_clock::time_point low_state_last_time;
     std::vector<float> low_state_period;
+    std::chrono::high_resolution_clock::time_point low_cmd_last_time;
+    std::vector<float> low_cmd_period;
     std::chrono::high_resolution_clock::time_point depth_image_last_time;
     std::vector<float> depth_image_period;
     std::vector<float> compute_time;
@@ -177,6 +195,7 @@ private:
     // 500Hz
     void lowStateMessageHandler(const void* msg)
     {
+        low_state = *(legged::idl::agilepf::LowState*)msg;
         #ifdef PRINT_DEBUG
             // calculate time between two successive messages
             auto cur_time = std::chrono::high_resolution_clock::now();
@@ -196,12 +215,20 @@ private:
                 }
                 message_logger->info("low_state subscriber Performance: mean: {} ms; max: {} ms; min: {} ms.",
                             sum / 500, max, min);
+                message_logger->info("low_state motor position: {}, {}, {}, {}, {}, {}.",
+                            low_state.motor_state()[0].q(),
+                            low_state.motor_state()[1].q(),
+                            low_state.motor_state()[2].q(),
+                            low_state.motor_state()[3].q(),
+                            low_state.motor_state()[4].q(),
+                            low_state.motor_state()[5].q());
+                message_logger->info("low_state subscriber cpu id: {}.",
+                            sched_getcpu());
                 message_logger->flush();
                 low_state_period.clear();
             }
         #endif
-
-        low_state = *(legged::idl::agilepf::LowState*)msg;
+        // process low state
         {
             std::lock_guard<std::mutex> lock(state_mutex);
             robot_interface.updateLowState(low_state);
@@ -250,6 +277,32 @@ private:
     // 500Hz
     void lowCmdwriteHandler()
     {
+        #ifdef PRINT_DEBUG
+            // calculate time between two successive messages
+            auto cur_time = std::chrono::high_resolution_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(cur_time - low_cmd_last_time).count();
+            low_cmd_last_time = cur_time;
+            low_cmd_period.push_back(duration / 1000.0f); // ms
+            if (low_cmd_period.size() == 500)
+            {
+                float sum = 0;
+                float min = low_cmd_period[0];
+                float max = 0;
+                for (auto &t : low_cmd_period)
+                {
+                    sum += t;
+                    if( t < min ) min = t;
+                    if( t > max ) max = t;
+                }
+                message_logger->info("low_cmd publisher Performance: mean: {} ms; max: {} ms; min: {} ms.",
+                            sum / 500, max, min);
+                message_logger->info("low_cmd publisher cpu id: {}.",
+                            sched_getcpu());
+                message_logger->flush();
+                low_cmd_period.clear();
+            }
+        #endif
+        // publish low level command
         {
             std::lock_guard<std::mutex> lock(cmd_mutex);
             low_cmd_publisher->publish(&low_cmd);
@@ -277,6 +330,8 @@ private:
 
     void startSendCmd()
     {
+        // save starting time
+        low_cmd_last_time = std::chrono::high_resolution_clock::now();
         // write_low_cmd thread: 2000us(2ms), 500Hz; running on CPU4
         low_cmd_publish_task = createPeriodicTask("write_low_cmd", 2000, 
             std::bind(&RobotController::lowCmdwriteHandler, this),

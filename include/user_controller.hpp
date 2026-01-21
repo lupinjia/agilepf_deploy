@@ -377,7 +377,6 @@ private:
         }
     }
 
-
 };
 
 class DepthController : public BasicUserController
