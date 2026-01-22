@@ -19,7 +19,12 @@
 #include <string>
 #include <deque>
 
-#include "torch/script.h"
+#ifdef INFER_LIBTORCH
+    #include "torch/script.h"
+#endif
+#ifdef INFER_OPENVINO
+    #include <openvino/openvino.hpp>
+#endif
 #include "robot_interface.hpp"
 #include "cfg.hpp"
 #include "common/mathTools.h"
@@ -91,6 +96,21 @@ public:
         gait_time = 0.0;
         last_actions.fill(0.0);
         config_file_name = cfg_file;
+
+        #ifdef INFER_OPENVINO
+        // -------- Get OpenVINO runtime version --------
+        spdlog::info("{} : {}", ov::get_openvino_version().description, ov::get_openvino_version().buildNumber);
+        // // -------- Step 1. Initialize OpenVINO Runtime Core --------
+        // ov::Core core;
+        // -------- Step 2. Get list of available devices --------
+        std::vector<std::string> availableDevices = core.get_available_devices();
+        // -------- Step 3. Query and print supported metrics and config keys --------
+        spdlog::info("Available devices: ");
+        for (auto&& device : availableDevices) {
+            spdlog::info("{}", device);
+        }
+        #endif
+
     }
 
     /**
@@ -157,7 +177,14 @@ public:
     {
         fs::path model_path = fs::current_path() / "../models";
         std::string policy_file = model_path / policy_name;
+        #ifdef INFER_LIBTORCH
         policy = torch::jit::load(policy_file);
+        #endif
+        #ifdef INFER_OPENVINO
+        policy = core.read_model(policy_file);
+        ov::CompiledModel compiled_model = core.compile_model(policy, "CPU");
+        infer_request = compiled_model.create_infer_request();
+        #endif
         spdlog::info("Load policy from: {}", policy_file);
     }
 
@@ -221,6 +248,7 @@ public:
         }
         history_obs.pop_front();
         history_obs.push_back(single_step_obs);
+        #ifdef INFER_LIBTORCH
         std::vector<torch::jit::IValue> policy_input;
         torch::Tensor policy_input_tensor = torch::zeros({1, frame_stack*num_single_obs}); // 输入的观测长度为58
         for(int i = 0; i < frame_stack; ++i)
@@ -232,6 +260,22 @@ public:
         }
         policy_input.push_back(policy_input_tensor);
         torch::Tensor policy_output_tensor = policy.forward(policy_input).toTensor();
+        #endif
+        #ifdef INFER_OPENVINO
+        ov::element::Type ov_type = ov::element::f32;
+        ov::Shape ov_shape = {1, frame_stack * num_single_obs};
+        ov::Tensor policy_input_tensor(ov_type, ov_shape);
+        for(int i = 0; i < frame_stack; ++i)
+        {
+            for(int j = 0; j < num_single_obs; ++j)
+            {
+                policy_input_tensor.data<float>()[i * num_single_obs + j] = history_obs.at(i).at(j);
+            }
+        }
+        infer_request.set_input_tensor(policy_input_tensor);
+        infer_request.infer();
+        ov::Tensor output_tensor = infer_request.get_output_tensor();
+        #endif
     }
 
     void calculate()
@@ -241,6 +285,7 @@ public:
         fill_single_step_obs();
         history_obs.pop_front();
         history_obs.push_back(single_step_obs);
+        #ifdef INFER_LIBTORCH
         std::vector<torch::jit::IValue> policy_input;
         torch::Tensor policy_input_tensor = torch::zeros({1, frame_stack*num_single_obs});
         for(int i = 0; i < frame_stack; ++i)
@@ -261,6 +306,31 @@ public:
             actions_scaled.at(i) = actions.at(i) * action_scale;
             jpos_des.at(i) = stand_pos.at(i) + actions_scaled.at(i);
         }
+        #endif
+        #ifdef INFER_OPENVINO
+        ov::element::Type ov_type = ov::element::f32;
+        ov::Shape ov_shape = {1, frame_stack * num_single_obs};
+        ov::Tensor policy_input_tensor(ov_type, ov_shape);
+        for(int i = 0; i < frame_stack; ++i)
+        {
+            for(int j = 0; j < num_single_obs; ++j)
+            {
+                    policy_input_tensor.data<float>()[i * num_single_obs + j] = history_obs.at(i).at(j);
+            }
+        }
+        infer_request.set_input_tensor(policy_input_tensor);
+        infer_request.infer();
+        ov::Tensor output_tensor = infer_request.get_output_tensor();
+        /***** 计算期望位置 *****/
+        std::array<float, 6> actions_scaled;
+        for(int i = 0; i < 6; ++i)// 将输出的动作保存下来
+        {
+            last_actions.at(i) = actions.at(i); // 保存上一次的动作
+            actions.at(i) = output_tensor.data<float>()[i]; // 输出动作
+            actions_scaled.at(i) = actions.at(i) * action_scale;
+            jpos_des.at(i) = stand_pos.at(i) + actions_scaled.at(i);
+        }
+        #endif
     }
 
     std::vector<float> getLog()
@@ -336,7 +406,14 @@ public:
     float max_lin_x;
 
     // NN model
+    #ifdef INFER_LIBTORCH
     torch::jit::script::Module policy;
+    #endif
+    #ifdef INFER_OPENVINO
+    std::shared_ptr<ov::Model> policy;
+    ov::Core core;
+    ov::InferRequest infer_request;
+    #endif
     int frame_stack;
     int num_single_obs; // length of single step observation
 private:
@@ -379,6 +456,8 @@ private:
 
 };
 
+// Demo controller that uses depth image as part of the observation
+// The outcome performance on agilepf is not very good, this controller is preserved
 class DepthController : public BasicUserController
 {
 public:
@@ -461,7 +540,9 @@ public:
     {
         fs::path model_path = fs::current_path() / "../models";
         std::string policy_file = model_path / policy_name;
+        #ifdef INFER_LIBTORCH
         policy = torch::jit::load(policy_file);
+        #endif
         spdlog::info("Load policy from: {}", policy_file);
     }
 
@@ -525,6 +606,7 @@ public:
         {
             single_step_obs.at(i) = 0.0;
         }
+        #ifdef INFER_LIBTORCH
         std::vector<torch::jit::IValue> policy_input;
         torch::Tensor cur_obs_tensor = torch::zeros({1, num_single_obs});
         for(int j = 0; j < num_single_obs; ++j)
@@ -543,6 +625,7 @@ public:
         policy_input.push_back(cur_obs_tensor);
         policy_input.push_back(depth_image_tensor);
         torch::Tensor policy_output_tensor = policy.forward(policy_input).toTensor();
+        #endif
     }
 
     void calculate()
@@ -550,6 +633,7 @@ public:
         calc_clock_input();
         // put current observation into history buffer
         fill_single_step_obs();
+        #ifdef INFER_LIBTORCH
         std::vector<torch::jit::IValue> policy_input;
         torch::Tensor cur_obs_tensor = torch::zeros({1, num_single_obs});
         for(int j = 0; j < num_single_obs; ++j)
@@ -577,6 +661,7 @@ public:
             actions_scaled.at(i) = actions.at(i) * action_scale;
             jpos_des.at(i) = stand_pos.at(i) + actions_scaled.at(i);
         }
+        #endif
     }
 
     std::vector<float> getLog()
@@ -657,7 +742,9 @@ public:
     float max_lin_x;
 
     // NN model
+    #ifdef INFER_LIBTORCH
     torch::jit::script::Module policy;
+    #endif
     int num_single_obs; // length of single step observation
 private:
 

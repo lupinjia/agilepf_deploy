@@ -430,6 +430,14 @@ private:
                          sum / 50,
                          *std::max_element(compute_time.begin(), compute_time.end()),
                          *std::min_element(compute_time.begin(), compute_time.end()));
+            #ifdef PRINT_DEBUG
+            message_logger->info("control thread cpu id: {}.", sched_getcpu());
+            message_logger->info("control thread Performance: mean: {} ms; max: {} ms; min: {} ms.",
+                                sum / 50,
+                                *std::max_element(compute_time.begin(), compute_time.end()),
+                                *std::min_element(compute_time.begin(), compute_time.end()));
+            message_logger->flush();
+            #endif
             compute_time.clear();
             
             spdlog::info("Current State: {}", state_machine.state_name[static_cast<size_t>(state_machine.state)]);
@@ -491,6 +499,7 @@ private:
     */
     void damping(float kd = 3.0)
     {
+        ctrl->dummyCalculate(); // warm up the neural network
         robot_interface.jpos_des.fill(0.);
         robot_interface.jvel_des.fill(0.);
         robot_interface.kp.fill(0.);
@@ -509,7 +518,6 @@ private:
 
     void standing()
     {
-        ctrl->dummyCalculate(); // warm up the neural network
         state_machine.standing(*ctrl);
         {
             std::lock_guard<std::mutex> lock(cmd_mutex);

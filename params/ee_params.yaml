@@ -1,3 +1,4 @@
+# onnx for openvino, pt for libtorch
 policy_name: "Jan18_21-42-19_gym_ee_policy.pt"
 dt: 0.02
 stand_kp: 60.0
