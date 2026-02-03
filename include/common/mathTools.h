@@ -135,4 +135,34 @@ inline T1 min(const T1 a, const T2 b){
 	return (a < b ? a : b);
 }
 
+std::array<float, 4> quatMultiply(const std::array<float, 4>& q1, const std::array<float, 4>& q2)
+{
+    // sequence is w, x, y, z
+    std::array<float, 4> q;
+    q[0] = q1[0]*q2[0] - q1[1]*q2[1] - q1[2]*q2[2] - q1[3]*q2[3];
+    q[1] = q1[0]*q2[1] + q1[1]*q2[0] + q1[2]*q2[3] - q1[3]*q2[2];
+    q[2] = q1[0]*q2[2] - q1[1]*q2[3] + q1[2]*q2[0] + q1[3]*q2[1];
+    q[3] = q1[0]*q2[3] + q1[1]*q2[2] - q1[2]*q2[1] + q1[3]*q2[0];
+    return q;
+}
+
+std::array<float, 4> rpyToQuat(const std::array<float, 3>& rpy)
+{
+    // sequence of quaternion is w, x, y, z
+    // rpy for roll-pitch-yaw
+    float cy = cos(rpy[2] * 0.5);
+    float sy = sin(rpy[2] * 0.5);
+    float cp = cos(rpy[1] * 0.5);
+    float sp = sin(rpy[1] * 0.5);
+    float cr = cos(rpy[0] * 0.5);
+    float sr = sin(rpy[0] * 0.5);
+
+    std::array<float, 4> q;
+    q[0] = cr * cp * cy + sr * sp * sy; // w
+    q[1] = sr * cp * cy - cr * sp * sy; // x
+    q[2] = cr * sp * cy + sr * cp * sy; // y
+    q[3] = cr * cp * sy - sr * sp * cy; // z
+    return q;
+}
+
 #endif  // MATHTOOLS_H

@@ -7,6 +7,7 @@
 #include <legged_sdk/idl/agilepf/LowState/LowState.hpp>
 #include <legged_sdk/idl/agilepf/DepthImage/DepthImage.hpp>
 #include <opencv2/opencv.hpp>
+#include <common/mathTools.h>
 
 class BasicRobotInterface
 {
@@ -23,13 +24,17 @@ public:
     tau_ff.fill(0.);
     projected_gravity.fill(0.);
     projected_gravity.at(2) = -1.0;
+    rpy_offset.fill(0.);
   }
 
   void updateLowState(legged::idl::agilepf::LowState &low_state)
   {
     // imu
     const legged::idl::agilepf::IMUState &imu = low_state.imu_state();
-    quat = imu.quaternion();
+    std::array<float, 4> raw_quat = imu.quaternion();
+    // apply rpy offset
+    auto quat_offset = rpyToQuat(rpy_offset);
+    quat = quatMultiply(quat_offset, raw_quat);
     rpy = imu.rpy();
     gyro = imu.gyroscope();
     acc = imu.accelerometer();
@@ -84,6 +89,8 @@ public:
   int depth_image_width;
   int depth_image_height;
   bool depth_first_rev = true;
+  // imu offset
+  std::array<float, 3> rpy_offset;
 
 private:
   inline void updateProjectedGravity()

@@ -23,6 +23,8 @@ cmd_ang_z_scale: 1.0
 min_lin_x: -0.5
 max_lin_x: 1.0
 
+rpy_offset_increment: 0.01
+
 stand_pos: [
   0.0,
   0.5,

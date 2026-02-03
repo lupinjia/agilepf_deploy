@@ -40,6 +40,7 @@ public:
             gait_period = cfg["gait_period"].as<float>();
             theta_left = cfg["theta_left"].as<float>();
             theta_right = cfg["theta_right"].as<float>();
+            rpy_offset_increment = cfg["rpy_offset_increment"].as<float>();
             for(const auto& v : cfg["stand_pos"])
             {
                 stand_pos.push_back(v.as<float>());
@@ -85,6 +86,7 @@ public:
     float theta_right;
     int frame_stack; // how many frames to stack for observation
     int num_single_obs; // length of single step observation
+    float rpy_offset_increment;
         
     std::vector<float> stand_pos;
     std::vector<float> start_pos;

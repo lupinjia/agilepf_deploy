@@ -68,6 +68,7 @@ public:
     float stand_kd;
     float ctrl_kp;
     float ctrl_kd;
+    float rpy_offset_increment;
     std::array<float, 6> start_pos; // initial pos when resting
     std::array<float, 6> stand_pos; // final pos for standing
     std::array<float, 6> jpos_des;  // calculated desired joint pos
@@ -146,6 +147,7 @@ public:
         gait_period = cfg.gait_period;
         theta_left = cfg.theta_left;
         theta_right = cfg.theta_right;
+        rpy_offset_increment = cfg.rpy_offset_increment;
         for (int i = 0; i < 6; ++i)
         {
             stand_pos.at(i) = cfg.stand_pos.at(i);

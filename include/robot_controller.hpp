@@ -115,7 +115,8 @@ public:
                             std::bind(&RobotController::lowStateMessageHandler, this, std::placeholders::_1), 2000.0f);
         low_cmd_publisher->init();
         low_state_subscriber->init();
-
+        
+        // enable depth communication according to currently used user controller
         if(enable_depth_comm)
         {
             depth_image_subscriber = std::make_shared<DDSSubscriber<legged::idl::agilepf::DepthImage,
@@ -343,6 +344,7 @@ private:
         // B -> Stand
         // A -> CTRL
         // Y -> Stop
+        // X -> Zero Torque
         if(gamepad.B.on_press)
         {
             if(state_machine.stand())
@@ -373,6 +375,23 @@ private:
         intepretGamePad();
         // update current state
         updateStateMachine();
+        // update imu offset in robot interface
+        if(gamepad.left.on_press) // left and right button to adjust roll offset
+        {
+            robot_interface.rpy_offset.at(0) += ctrl->rpy_offset_increment;
+        }
+        if(gamepad.right.on_press)
+        {
+            robot_interface.rpy_offset.at(0) -= ctrl->rpy_offset_increment;
+        }
+        if(gamepad.up.on_press) // up and down button to adjust pitch offset
+        {
+            robot_interface.rpy_offset.at(1) -= ctrl->rpy_offset_increment;
+        }
+        if(gamepad.down.on_press)
+        {
+            robot_interface.rpy_offset.at(1) += ctrl->rpy_offset_increment;
+        }
 
         // select control modes according to the state machine
         auto start = std::chrono::high_resolution_clock::now();
@@ -430,6 +449,10 @@ private:
                          sum / 50,
                          *std::max_element(compute_time.begin(), compute_time.end()),
                          *std::min_element(compute_time.begin(), compute_time.end()));
+            spdlog::info("Current IMU rpy offset: roll: {}, pitch: {}, yaw: {}",
+                     robot_interface.rpy_offset.at(0),
+                     robot_interface.rpy_offset.at(1),
+                     robot_interface.rpy_offset.at(2));
             #ifdef PRINT_DEBUG
             message_logger->info("control thread cpu id: {}.", sched_getcpu());
             message_logger->info("control thread Performance: mean: {} ms; max: {} ms; min: {} ms.",
