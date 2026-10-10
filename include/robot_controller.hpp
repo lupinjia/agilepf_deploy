@@ -563,11 +563,11 @@ private:
 
     bool CheckTermination()
     {
-        if (robot_interface.projected_gravity.at(2) > -0.2)
-        {
-            spdlog::info("Termination: projected_gravity.z = {}", robot_interface.projected_gravity.at(2));
-            return true;
-        }
+        // if (robot_interface.projected_gravity.at(2) > -0.2)
+        // {
+        //     spdlog::info("Termination: projected_gravity.z = {}", robot_interface.projected_gravity.at(2));
+        //     return true;
+        // }
         return false;
     }
 };
