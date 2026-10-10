@@ -5,8 +5,6 @@
 #include <chrono>
 #include <cmath>
 #include <legged_sdk/idl/agilepf/LowState/LowState.hpp>
-#include <legged_sdk/idl/agilepf/DepthImage/DepthImage.hpp>
-#include <opencv2/opencv.hpp>
 #include <common/mathTools.h>
 
 class BasicRobotInterface
@@ -50,45 +48,12 @@ public:
     }
   }
 
-  void updateDepthImage(legged::idl::agilepf::DepthImage &depth_image)
-  {
-    depth_image_width = depth_image.width();
-    depth_image_height = depth_image.height();
-    size_t total = static_cast<size_t>(depth_image_height) * static_cast<size_t>(depth_image_width);
-    if (depth_first_rev)
-    {
-      depth_image_buffer.resize(total);
-      depth_first_rev = false;
-    }
-    else if (depth_image_buffer.size() != total)
-    {
-      depth_image_buffer.resize(total);
-    }
-
-    // copy normalized values into the flat buffer
-    std::copy(depth_image.normalized_value().begin(), depth_image.normalized_value().end(), depth_image_buffer.begin());
-    
-    #ifdef PRINT_DEBUG
-      cv::Mat depth_mat(depth_image_height, depth_image_width, CV_32FC1, (void*)depth_image_buffer.data());
-      // convert to 8UC1 for visualization
-      cv::Mat depth_visual;
-      depth_mat.convertTo(depth_visual, CV_8UC1, 255.0);
-      cv::imshow("Depth Image", depth_visual);
-      cv::waitKey(1);
-    #endif
-  }
-
   // robot state
   std::array<float, 6> jpos, jvel;
   std::array<float, 4> quat;
   std::array<float, 3> rpy, gyro, projected_gravity, acc;
   // robot cmd
   std::array<float, 6> jpos_des, jvel_des, kp, kd, tau_ff;
-  // depth image
-  std::vector<float> depth_image_buffer;
-  int depth_image_width;
-  int depth_image_height;
-  bool depth_first_rev = true;
   // imu offset
   std::array<float, 3> rpy_offset;
 

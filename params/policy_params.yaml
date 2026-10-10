@@ -1,0 +1,18 @@
+policy_name: "2026-10-09_18-29-35_flat.onnx"
+dt: 0.02
+stand_kp: 60.0
+stand_kd: 3.0
+
+cmd_lin_x_scale: 1.0
+cmd_lin_y_scale: 0.4
+cmd_ang_z_scale: 1.0
+min_lin_x: -0.5
+max_lin_x: 1.0
+rpy_offset_increment: 0.01
+
+# The ONNX metadata default pose [0, 0.5, -0.5, 0, 0.5, -0.5] is within
+# the policy target bounds below. The historical start pose is retained as-is;
+# its calf entries (-1.98) are below the policy bounds (-1.8) by design.
+start_pos: [0.32, 1.21, -1.98, -0.32, 1.21, -1.98]
+lower_limit: [-0.4, -1.1, -1.8, -0.4, -1.1, -1.8]
+upper_limit: [0.4, 2.7, -0.1, 0.4, 2.7, -0.1]

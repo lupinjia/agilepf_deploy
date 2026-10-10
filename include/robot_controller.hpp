@@ -16,14 +16,13 @@
 #include <sstream>
 #include <sched.h>
 #include <typeinfo>
+#include <exception>
 
 #include "spdlog/sinks/basic_file_sink.h"
 #include "common/mathTools.h"
 #include <legged_sdk/common/periodic_task.hpp>
 #include <legged_sdk/idl/agilepf/LowState/LowState.hpp>
 #include <legged_sdk/idl/agilepf/LowState/LowStatePubSubTypes.hpp>
-#include <legged_sdk/idl/agilepf/DepthImage/DepthImage.hpp>
-#include <legged_sdk/idl/agilepf/DepthImage/DepthImagePubSubTypes.hpp>
 #include <legged_sdk/dds/dds_publisher.hpp>
 #include <legged_sdk/dds/dds_subscriber.hpp>
 #include <legged_sdk/idl/agilepf/LowCmd/LowCmd.hpp>
@@ -40,7 +39,6 @@ using namespace legged::common;
 
 #define TOPIC_LOWCMD "rt/lowcmd"
 #define TOPIC_LOWSTATE "rt/lowstate"
-#define TOPIC_DEPTHIMAGE "rt/depthimage"
 
 // RobotController为一个框架, 将有限状态机整体的逻辑具象化为一个类
 class RobotController
@@ -52,35 +50,17 @@ public:
                     int domain_id, std::string interface_name) :
         ctrl(user_ctrl), domain_id_(domain_id), interface_name_(interface_name)
     {
-        if (typeid(*ctrl) == typeid(EEController))
-        {
-            spdlog::info("Using EEController as user controller.");
-            enable_depth_comm = false; // ee controller does not need depth image communication
-        }
-        else if(typeid(*ctrl) == typeid(DepthController))
-        {
-            spdlog::info("Using DepthController as user controller.");
-            enable_depth_comm = true; // depth controller needs depth image communication
-        }
         // set log file
         robot_state_log_file = std::ofstream(log_folder / "robot_state_log.csv");
         std::stringstream header;
         header << "compute_time,";
         header << "state,";
-        header << "cmd_lin_x,cmd_lin_y,cmd_ang_z,";                            // cmd
-        header << "projected_gravity0,projected_gravity1,projected_gravity2,"; // projected_gravity
-        header << "base_ang_vel_x,base_ang_vel_y,base_ang_vel_z,";             // base_ang_vel
-        header << "jpos_0,jpos_1,jpos_2,jpos_3,jpos_4,jpos_5,";                // dof_pos
-        header << "jvel_0,jvel_1,jvel_2,jvel_3,jvel_4,jvel_5,";                // dof_vel
-        header << "clock_input0,clock_input1,clock_input2,clock_input3,";   // clock_input
-        header << "gait_time,gait_phase,";
-        // header << "last_action0,last_action1,last_action2,last_action3,last_action4,last_action5,";          // actions
-        // header << "action0,action1,action2,action3,action4,action5,"; // actions
-        // header << "kp_0,kp_1,kp_2,kp_3,kp_4,kp_5,";
-        // header << "kd_0,kd_1,kd_2,kd_3,kd_4,kd_5";
-        // header << "jpos_des0,jpos_des1,jpos_des2,jpos_des3,jpos_des4,jpos_des5,"; // last_jpos_des
-        // header << "jvel_des0,jvel_des1,jvel_des2,jvel_des3,jvel_des4,jvel_des5,"; // jvel_des
-        // header << "tau0,tau1,tau2,tau3,tau4,tau5,"; // tau_ff
+        header << "cmd_lin_x,cmd_lin_y,cmd_ang_z,"; // cmd (3)
+        header << "projected_gravity_x,projected_gravity_y,projected_gravity_z,"; // gravity (3)
+        header << "gyro_x,gyro_y,gyro_z,"; // gyro (3)
+        header << "joint_position_0,joint_position_1,joint_position_2,joint_position_3,joint_position_4,joint_position_5,"; // joint position (6)
+        header << "joint_velocity_0,joint_velocity_1,joint_velocity_2,joint_velocity_3,joint_velocity_4,joint_velocity_5,"; // joint velocity (6)
+        header << "action_0,action_1,action_2,action_3,action_4,action_5"; // actions (6)
         header << std::endl;
         robot_state_log_file << header.str();
 
@@ -105,7 +85,6 @@ public:
     {
         // init time variables
         low_state_last_time = std::chrono::high_resolution_clock::now();
-        depth_image_last_time = std::chrono::high_resolution_clock::now();
 
         // init DDS publisher and subscriber
         low_cmd_publisher = std::make_shared<DDSPublisher<legged::idl::agilepf::LowCmd,
@@ -116,14 +95,6 @@ public:
         low_cmd_publisher->init();
         low_state_subscriber->init();
         
-        // enable depth communication according to currently used user controller
-        if(enable_depth_comm)
-        {
-            depth_image_subscriber = std::make_shared<DDSSubscriber<legged::idl::agilepf::DepthImage,
-                         legged::idl::agilepf::DepthImagePubSubType>>(domain_id_, interface_name_, TOPIC_DEPTHIMAGE, 
-                            std::bind(&RobotController::depthImageMessageHandler, this, std::placeholders::_1), 100000.0f);
-            depth_image_subscriber->init();
-        }
     }
 
     void startControl()
@@ -157,14 +128,10 @@ protected:
                         legged::idl::agilepf::LowCmdPubSubType> low_cmd_publisher;
     DDSSubscriberPtr<legged::idl::agilepf::LowState,
                          legged::idl::agilepf::LowStatePubSubType> low_state_subscriber;
-    DDSSubscriberPtr<legged::idl::agilepf::DepthImage,
-                         legged::idl::agilepf::DepthImagePubSubType> depth_image_subscriber;
     PeriodicTaskPtr low_cmd_publish_task, control_task;
 
     legged::idl::agilepf::LowCmd low_cmd;
     legged::idl::agilepf::LowState low_state;
-    legged::idl::agilepf::DepthImage depth_image;
-    bool enable_depth_comm;
 
     SimpleStateMachine state_machine;
     BasicUserController* ctrl;
@@ -184,9 +151,8 @@ protected:
     std::vector<float> low_state_period;
     std::chrono::high_resolution_clock::time_point low_cmd_last_time;
     std::vector<float> low_cmd_period;
-    std::chrono::high_resolution_clock::time_point depth_image_last_time;
-    std::vector<float> depth_image_period;
     std::vector<float> compute_time;
+    bool control_fault_latched = false;
 
     int domain_id_;
     std::string interface_name_;
@@ -233,40 +199,6 @@ private:
         {
             std::lock_guard<std::mutex> lock(state_mutex);
             robot_interface.updateLowState(low_state);
-        }
-    }
-
-    // 10Hz
-    void depthImageMessageHandler(const void* msg)
-    {
-        #ifdef PRINT_DEBUG
-            // calculate time between two successive messages
-            auto cur_time = std::chrono::high_resolution_clock::now();
-            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(cur_time - depth_image_last_time).count();
-            depth_image_last_time = cur_time;
-            depth_image_period.push_back(duration / 1000.0f); // ms
-            if (depth_image_period.size() == 10)
-            {
-                float sum = 0;
-                float min = depth_image_period[0];
-                float max = 0;
-                for (auto &t : depth_image_period)
-                {
-                    sum += t;
-                    if( t < min ) min = t;
-                    if( t > max ) max = t;
-                }
-                message_logger->info("depth_image subscriber Performance: mean: {} ms; max: {} ms; min: {} ms.",
-                            sum / 10, max, min);
-                message_logger->flush();
-                depth_image_period.clear();
-            }
-        #endif
-        depth_image = *(legged::idl::agilepf::DepthImage*)msg;
-        // process depth image if needed
-        {
-            std::lock_guard<std::mutex> lock(state_mutex);
-            robot_interface.updateDepthImage(depth_image);
         }
     }
 
@@ -372,6 +304,8 @@ private:
     // 50Hz
     void controlStep()
     {
+      try
+      {
         intepretGamePad();
         // update current state
         updateStateMachine();
@@ -464,6 +398,50 @@ private:
             compute_time.clear();
             
             spdlog::info("Current State: {}", state_machine.state_name[static_cast<size_t>(state_machine.state)]);
+        }
+      }
+      catch(const std::exception& error)
+      {
+        tripControlFault(error.what());
+      }
+      catch(...)
+      {
+        tripControlFault("unknown exception");
+      }
+    }
+
+    void tripControlFault(const char* reason) noexcept
+    {
+        const bool first_fault = !control_fault_latched;
+        control_fault_latched = true;
+        state_machine.latchFault();
+
+        // Atomically replace the active output before the publisher can resend it.
+        robot_interface.jpos_des.fill(0.);
+        robot_interface.jvel_des.fill(0.);
+        robot_interface.kp.fill(0.);
+        robot_interface.kd.fill(0.);
+        robot_interface.tau_ff.fill(0.);
+        try
+        {
+            std::lock_guard<std::mutex> lock(cmd_mutex);
+            set_cmd();
+        }
+        catch(...)
+        {
+            // Do not allow fault handling to escape the periodic callback.
+        }
+
+        if(first_fault)
+        {
+            try
+            {
+                spdlog::error("Control fault latched; entering ZERO_TORQUE: {}", reason);
+            }
+            catch(...)
+            {
+                // Logging must never interfere with the emergency command.
+            }
         }
     }
 

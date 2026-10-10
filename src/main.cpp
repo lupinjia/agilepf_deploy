@@ -11,7 +11,6 @@
 #include <thread>
 
 #include "robot_controller.hpp"
-#include "user_controller.hpp"
 #include "robot_interface.hpp"
 
 namespace fs = std::filesystem;
@@ -35,24 +34,15 @@ int main(int argc, char const *argv[])
     fs::path log_file_name = log_folder / "log.csv";
 
     /***** Controller *****/
-    BasicUserController* user_ctrl;
-    if(argv[1] == std::string("depth"))
-    {
-        std::string config_file_dir = param / "depth_params.yaml";
-        user_ctrl = new DepthController(config_file_dir);
-    }
-    else if(argv[1] == std::string("ee")) // ee
-    {
-        std::string config_file_dir = param / "ee_params.yaml";
-        user_ctrl = new EEController(config_file_dir);
-    }
+    std::string config_file_dir = (param / "policy_params.yaml").string();
+    OnnxController* user_ctrl = new OnnxController(config_file_dir);
     
     int domain_id;
     std::string interface_name;
-    if(argc > 2) // use specified interface name
+    if(argc > 1) // use specified interface name
     {
         domain_id = 0;
-        interface_name = argv[2];
+        interface_name = argv[1];
     }
     else // local loopback
     {

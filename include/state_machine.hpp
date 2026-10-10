@@ -28,6 +28,10 @@ public:
    */
   bool damp()
   {
+    if(fault_latched && !fault_reset_requested)
+    {
+      return false;
+    }
     state = STATES::DAMPING;
     return true;
   }
@@ -48,15 +52,15 @@ public:
 
   bool ctrl()
   {
-    // agilepf can enter CTRL state from DAMPING state directly
-    if(state == STATES::DAMPING)
+    if((state == STATES::DAMPING || state == STATES::STAND) &&
+       (!fault_latched || fault_reset_requested))
     {
       state = STATES::CTRL;
       return true;
     }
-    else // only from DAMPING can one enter CTRL state
+    else
     {
-      spdlog::warn("Cannot enter CTRL state from current state!");
+      spdlog::warn("Cannot enter CTRL state from current state or before fault recovery!");
       return false;
     }
   }
@@ -77,7 +81,18 @@ public:
   bool zeroTorque()
   {
     state = STATES::ZERO_TORQUE;
+    if(fault_latched)
+    {
+      fault_reset_requested = true;
+    }
     return true;
+  }
+
+  void latchFault() noexcept
+  {
+    fault_latched = true;
+    fault_reset_requested = false;
+    state = STATES::ZERO_TORQUE;
   }
 
   void standing(BasicUserController &ctrl)
@@ -100,5 +115,7 @@ protected:
   int standing_count = 0;       // start counting after entering STATES::STAND, for linear interpolation
   float standing_percent = 0.0; // percent of linear interpolation
   int standing_duration = 200;  // decides the period of standing
+  bool fault_latched = false;
+  bool fault_reset_requested = false;
 };
 #endif
