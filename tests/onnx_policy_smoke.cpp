@@ -1,9 +1,12 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <vector>
 
@@ -19,20 +22,66 @@ using Actions = std::array<float, 6>;
 constexpr Actions kActionScale = {0.749f, 0.749f, 0.749f, 0.749f, 0.749f, 0.749f};
 constexpr Actions kDefaultPose = {0.0f, 0.5f, -0.5f, 0.0f, 0.5f, -0.5f};
 
+struct TemporaryDirectory {
+    std::filesystem::path path = std::filesystem::temp_directory_path() /
+        ("agilepf_default_offset_smoke_" + std::to_string(
+            std::chrono::high_resolution_clock::now().time_since_epoch().count()));
+    TemporaryDirectory() { std::filesystem::create_directories(path); }
+    ~TemporaryDirectory() { std::error_code ignored; std::filesystem::remove_all(path, ignored); }
+};
+
+void writePolicyConfig(const std::filesystem::path& path, const std::string& policy_name,
+                       const std::string& offset_line = {})
+{
+    std::ofstream out(path);
+    if (!out) throw std::runtime_error("cannot create temporary policy config");
+    out << "policy_name: \"" << policy_name << "\"\n"
+        << "dt: 0.02\nstand_kp: 60.0\nstand_kd: 3.0\n"
+        << "cmd_lin_x_scale: 1.0\ncmd_lin_y_scale: 0.4\ncmd_ang_z_scale: 1.0\n"
+        << "min_lin_x: -0.5\nmax_lin_x: 1.0\nrpy_offset_increment: 0.01\n"
+        << "start_pos: [0.32, 1.21, -1.98, -0.32, 1.21, -1.98]\n"
+        << "lower_limit: [-0.4, -1.1, -1.8, -0.4, -1.1, -1.8]\n"
+        << "upper_limit: [0.4, 2.7, -0.1, 0.4, 2.7, -0.1]\n";
+    if (!offset_line.empty()) out << offset_line << '\n';
+    if (!out) throw std::runtime_error("failed writing temporary policy config");
+}
+
+void requireOffsetConfigRejected(const std::filesystem::path& path, const std::string& policy_name,
+                                 const std::string& offset_line, const char* expected_error)
+{
+    writePolicyConfig(path, policy_name, offset_line);
+    try {
+        (void)PolicyCfg(path.string());
+    } catch (const std::exception& error) {
+        if (std::string(error.what()).find(expected_error) != std::string::npos) return;
+        throw std::runtime_error(std::string("unexpected offset validation error: ") + error.what());
+    }
+    throw std::runtime_error("malformed default_joint_pos_offset was accepted");
+}
+
 void requireClose(float actual, float expected, const char* label)
 {
     if (!std::isfinite(actual) || std::abs(actual - expected) > 1e-5f)
         throw std::runtime_error(std::string(label) + " differs from direct ONNX reference");
 }
 
-Frame makeExpectedFrame(const BasicRobotInterface& robot, const Gamepad& pad, const Actions& previous_actions)
+void requireArrayClose(const std::array<float, 6>& actual, const std::array<float, 6>& expected,
+                       const char* label)
+{
+    for (size_t i = 0; i < actual.size(); ++i)
+        requireClose(actual[i], expected[i], label);
+}
+
+Frame makeExpectedFrame(const BasicRobotInterface& robot, const Gamepad& pad,
+                        const Actions& previous_actions, const Actions& stand_pos)
 {
     Frame f{};
     const std::array<std::array<float, 6>, kTermCount> raw = {{
         {{pad.ly + pad.ry, -pad.lx * 0.4f, -pad.rx, 0, 0, 0}},
         {{robot.gyro[0], robot.gyro[1], robot.gyro[2], 0, 0, 0}},
         {{robot.projected_gravity[0], robot.projected_gravity[1], robot.projected_gravity[2], 0, 0, 0}},
-        {{robot.jpos[0], robot.jpos[1] - 0.5f, robot.jpos[2] + 0.5f, robot.jpos[3], robot.jpos[4] - 0.5f, robot.jpos[5] + 0.5f}},
+        {{robot.jpos[0] - stand_pos[0], robot.jpos[1] - stand_pos[1], robot.jpos[2] - stand_pos[2],
+          robot.jpos[3] - stand_pos[3], robot.jpos[4] - stand_pos[4], robot.jpos[5] - stand_pos[5]}},
         {{robot.jvel[0], robot.jvel[1], robot.jvel[2], robot.jvel[3], robot.jvel[4], robot.jvel[5]}},
         {{previous_actions[0], previous_actions[1], previous_actions[2], previous_actions[3], previous_actions[4], previous_actions[5]}}
     }};
@@ -96,13 +145,13 @@ void compareObservationBits(const Observation& expected, const Observation& actu
     }
 }
 
-void compareResult(OnnxController& controller, const Actions& expected)
+void compareResult(OnnxController& controller, const Actions& expected, const Actions& stand_pos)
 {
     const auto log = controller.getLog();
     if (log.size() != 27) throw std::runtime_error("expected 27 controller log values");
     for (size_t i = 0; i < 6; ++i) {
         requireClose(log[21 + i], expected[i], "raw action");
-        requireClose(controller.jpos_des[i], kDefaultPose[i] + kActionScale[i] * expected[i], "desired target");
+        requireClose(controller.jpos_des[i], stand_pos[i] + kActionScale[i] * expected[i], "desired target");
     }
 }
 } // namespace
@@ -110,13 +159,52 @@ void compareResult(OnnxController& controller, const Actions& expected)
 int main()
 {
     try {
-        const std::filesystem::path config(POLICY_PARAMS_FILE);
-        const PolicyCfg policy_config(config.string());
+        const std::filesystem::path source_config(POLICY_PARAMS_FILE);
+        const PolicyCfg source_policy_config(source_config.string());
+        TemporaryDirectory temp;
+        const auto offset_config = temp.path / "offset.yaml";
+        const auto missing_offset_config = temp.path / "missing_offset.yaml";
+        const auto malformed_config = temp.path / "malformed.yaml";
+        const auto nonfinite_config = temp.path / "nonfinite.yaml";
+        const Actions offsets = {0.011f, -0.022f, 0.033f, -0.044f, 0.055f, -0.066f};
+        std::ostringstream offset_yaml;
+        offset_yaml << "default_joint_pos_offset: [";
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            if (i) offset_yaml << ", ";
+            offset_yaml << offsets[i];
+        }
+        offset_yaml << "]";
+        writePolicyConfig(offset_config, source_policy_config.policy_name, offset_yaml.str());
+        writePolicyConfig(missing_offset_config, source_policy_config.policy_name);
+        const PolicyCfg missing_offset_policy(missing_offset_config.string());
+        requireArrayClose(missing_offset_policy.default_joint_pos_offset, Actions{}, "missing offset defaults to zero");
+        requireOffsetConfigRejected(malformed_config, source_policy_config.policy_name,
+            "default_joint_pos_offset: [0.1, 0.2, 0.3, 0.4, 0.5]", "Expected six YAML values for default_joint_pos_offset");
+        requireOffsetConfigRejected(nonfinite_config, source_policy_config.policy_name,
+            "default_joint_pos_offset: [0.1, 0.2, 0.3, 0.4, 0.5, .nan]", "Non-finite YAML value for default_joint_pos_offset");
+
+        const PolicyCfg policy_config(offset_config.string());
         const auto model = std::filesystem::weakly_canonical(
-            config.parent_path() / ".." / "models" / policy_config.policy_name);
-        OnnxController controller(config.string());
+            source_config.parent_path() / ".." / "models" / policy_config.policy_name);
+
+        OnnxController default_controller(offset_config.string());
+        default_controller.loadParam();
+        default_controller.loadPolicy();
+        requireArrayClose(default_controller.stand_pos, kDefaultPose, "default interface ignores offset");
+        OnnxController lo_controller(offset_config.string(), "lo");
+        lo_controller.loadParam();
+        lo_controller.loadPolicy();
+        requireArrayClose(lo_controller.stand_pos, kDefaultPose, "explicit lo ignores offset");
+
+        Actions expected_shifted_pose{};
+        for (size_t i = 0; i < expected_shifted_pose.size(); ++i)
+            expected_shifted_pose[i] = kDefaultPose[i] + offsets[i];
+        OnnxController controller(offset_config.string(), "eth0");
         controller.loadParam();
         controller.loadPolicy();
+        requireArrayClose(controller.stand_pos, expected_shifted_pose, "eth0 applies offset");
+        controller.loadPolicy();
+        requireArrayClose(controller.stand_pos, expected_shifted_pose, "repeated load does not accumulate offset");
 
         Ort::Env oracle_env(ORT_LOGGING_LEVEL_WARNING, "onnx_policy_oracle");
         Ort::SessionOptions options;
@@ -126,7 +214,7 @@ int main()
         BasicRobotInterface robot;
         robot.projected_gravity = {0.0f, 0.0f, -1.0f};
         robot.gyro = {0.0f, 0.0f, 0.0f};
-        robot.jpos = {0.0f, 0.5f, -0.5f, 0.0f, 0.5f, -0.5f};
+        robot.jpos = controller.stand_pos;
         robot.jvel = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
         Gamepad gamepad;
         // A small negative x command yields deterministic targets within the
@@ -140,7 +228,7 @@ int main()
         // Defer warm-up until after deterministic reference comparisons; it is
         // still exercised below without affecting the live observation sequence.
 
-        Frame first = makeExpectedFrame(robot, gamepad, previous);
+        Frame first = makeExpectedFrame(robot, gamepad, previous, controller.stand_pos);
         std::array<Frame, kHistory> first_history = {first, first, first}; // first-frame backfill
         const Observation expected_first_input = flatten(first_history);
         const Actions first_expected = runOracle(oracle, expected_first_input);
@@ -170,22 +258,24 @@ int main()
             throw;
         }
         compareObservationBits(expected_first_input, controller.lastPolicyInput());
-        compareResult(controller, first_expected);
+        compareResult(controller, first_expected, controller.stand_pos);
         previous = first_expected; // raw outputs become the next observation's action term
 
         robot.projected_gravity = {0.01f, -0.01f, -0.9999f};
         robot.gyro = {0.01f, -0.02f, 0.01f};
-        robot.jpos = {0.005f, 0.505f, -0.495f, -0.005f, 0.495f, -0.505f};
+        robot.jpos = controller.stand_pos;
+        const Actions position_delta = {0.005f, 0.005f, 0.005f, -0.005f, -0.005f, -0.005f};
+        for (size_t i = 0; i < robot.jpos.size(); ++i) robot.jpos[i] += position_delta[i];
         robot.jvel = {0.005f, -0.005f, 0.01f, -0.005f, 0.005f, -0.01f};
         gamepad.ly = 0.01f; gamepad.ry = 0.0f; gamepad.lx = 0.01f; gamepad.rx = -0.01f;
         controller.getInput(robot, gamepad);
-        const Frame second = makeExpectedFrame(robot, gamepad, previous);
+        const Frame second = makeExpectedFrame(robot, gamepad, previous, controller.stand_pos);
         const std::array<Frame, kHistory> second_history = {first, first, second};
         const Observation expected_second_input = flatten(second_history);
         const Actions second_expected = runOracle(oracle, expected_second_input);
         controller.calculate();
         compareObservationBits(expected_second_input, controller.lastPolicyInput());
-        compareResult(controller, second_expected);
+        compareResult(controller, second_expected, controller.stand_pos);
         controller.dummyCalculate();
         for (float value : controller.getLog())
             if (!std::isfinite(value)) throw std::runtime_error("non-finite controller log value");
@@ -194,12 +284,12 @@ int main()
         // buffer and compare it against the exact bytes sent by the controller.
         robot.projected_gravity = {0.0f, 0.0f, -1.0f};
         robot.gyro = {0.0f, 0.0f, 0.0f};
-        robot.jpos = {0.0f, 0.5f, -0.5f, 0.0f, 0.5f, -0.5f};
+        robot.jpos = controller.stand_pos;
         robot.jvel = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
         gamepad.ly = 0.0f; gamepad.ry = 0.0f; gamepad.lx = 0.0f; gamepad.rx = 0.0f;
         controller.getInput(robot, gamepad);
         controller.reset(robot);
-        const Frame neutral_frame = makeExpectedFrame(robot, gamepad, Actions{});
+        const Frame neutral_frame = makeExpectedFrame(robot, gamepad, Actions{}, controller.stand_pos);
         const Observation neutral_input = flatten({neutral_frame, neutral_frame, neutral_frame});
         const Actions neutral_expected = runOracle(oracle, neutral_input);
         controller.calculate();
@@ -209,18 +299,18 @@ int main()
             requireClose(neutral_replay[i], neutral_expected[i], "neutral repeated-session action");
             requireClose(controller.lastPolicyOutput()[i], neutral_expected[i], "neutral controller action");
         }
-        compareResult(controller, neutral_expected);
+        compareResult(controller, neutral_expected, controller.stand_pos);
 
         // Compare a synthetic all-zero observation and all resulting targets
         // without assuming anything about their range relative to YAML limits.
         robot.projected_gravity = {0.0f, 0.0f, 0.0f};
         robot.gyro = {0.0f, 0.0f, 0.0f};
-        robot.jpos = {0.0f, 0.5f, -0.5f, 0.0f, 0.5f, -0.5f};
+        robot.jpos = controller.stand_pos;
         robot.jvel = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
         gamepad.ly = 0.0f; gamepad.ry = 0.0f; gamepad.lx = 0.0f; gamepad.rx = 0.0f;
         controller.getInput(robot, gamepad);
         controller.reset(robot);
-        const Frame zero_frame = makeExpectedFrame(robot, gamepad, Actions{});
+        const Frame zero_frame = makeExpectedFrame(robot, gamepad, Actions{}, controller.stand_pos);
         const Observation zero_input = flatten({zero_frame, zero_frame, zero_frame});
         const Actions zero_expected = runOracle(oracle, zero_input);
         controller.calculate();
@@ -230,7 +320,7 @@ int main()
             requireClose(zero_replay[i], zero_expected[i], "zero-frame oracle replay");
             requireClose(controller.lastPolicyOutput()[i], zero_expected[i], "zero-frame controller action");
         }
-        compareResult(controller, zero_expected);
+        compareResult(controller, zero_expected, controller.stand_pos);
 
         std::cout << "ONNX policy oracle smoke test passed\n";
         return 0;

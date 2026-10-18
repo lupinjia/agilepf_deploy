@@ -35,8 +35,6 @@ int main(int argc, char const *argv[])
 
     /***** Controller *****/
     std::string config_file_dir = (param / "policy_params.yaml").string();
-    OnnxController* user_ctrl = new OnnxController(config_file_dir);
-    
     int domain_id;
     std::string interface_name;
     if(argc > 1) // use specified interface name
@@ -49,6 +47,7 @@ int main(int argc, char const *argv[])
         domain_id = 1;
         interface_name = "lo";
     }
+    OnnxController* user_ctrl = new OnnxController(config_file_dir, interface_name);
     RobotController *robot_controller = new RobotController(log_folder, 
                                     user_ctrl, domain_id, interface_name);
     // load parameter from .json file

@@ -24,6 +24,13 @@ struct PolicyCfg
         readArray(yaml["start_pos"], start_pos, "start_pos");
         readArray(yaml["lower_limit"], lower_limit, "lower_limit");
         readArray(yaml["upper_limit"], upper_limit, "upper_limit");
+        if (yaml["default_joint_pos_offset"]) {
+            try {
+                readArray(yaml["default_joint_pos_offset"], default_joint_pos_offset, "default_joint_pos_offset");
+            } catch (const std::exception& error) {
+                throw std::runtime_error("Invalid default_joint_pos_offset in policy YAML: " + std::string(error.what()));
+            }
+        }
         if (policy_name.empty() || !std::isfinite(dt) || dt <= 0 ||
             !std::isfinite(stand_kp) || !std::isfinite(stand_kd) ||
             !std::isfinite(cmd_lin_x_scale) || !std::isfinite(cmd_lin_y_scale) ||
@@ -40,7 +47,7 @@ struct PolicyCfg
     float dt{}, stand_kp{}, stand_kd{};
     float cmd_lin_x_scale{}, cmd_lin_y_scale{}, cmd_ang_z_scale{};
     float min_lin_x{}, max_lin_x{}, rpy_offset_increment{};
-    std::array<float, 6> start_pos{}, lower_limit{}, upper_limit{};
+    std::array<float, 6> start_pos{}, lower_limit{}, upper_limit{}, default_joint_pos_offset{};
 
 private:
     static void readArray(const YAML::Node& node, std::array<float, 6>& out, const char* name)

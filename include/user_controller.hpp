@@ -49,8 +49,8 @@ class OnnxController final : public BasicUserController
     };
 
 public:
-    explicit OnnxController(const std::string& config_filename)
-        : config_filename_(config_filename), env_(ORT_LOGGING_LEVEL_WARNING, "OnnxController")
+    explicit OnnxController(const std::string& config_filename, const std::string& network_interface = "lo")
+        : config_filename_(config_filename), network_interface_(network_interface), env_(ORT_LOGGING_LEVEL_WARNING, "OnnxController")
     {
         cmd.fill(0); gravity = {0, 0, -1}; gyro.fill(0); jpos.fill(0); jvel.fill(0); actions.fill(0);
         jpos_des.fill(0);
@@ -64,6 +64,7 @@ public:
         cmd_ang_z_scale_ = cfg.cmd_ang_z_scale; min_lin_x_ = cfg.min_lin_x; max_lin_x_ = cfg.max_lin_x;
         rpy_offset_increment = cfg.rpy_offset_increment; start_pos = cfg.start_pos;
         lower_limit = cfg.lower_limit; upper_limit = cfg.upper_limit;
+        default_joint_pos_offset_ = cfg.default_joint_pos_offset;
         params_loaded_ = true;
     }
 
@@ -74,7 +75,13 @@ public:
         session_ = std::make_unique<Ort::Session>(env_, model_path.c_str(), session_options_);
         parseMetadata();
         validateGraph();
-        stand_pos = metadata_.default_pos;
+        // Always derive from immutable model defaults so repeated loads cannot accumulate offsets.
+        for (size_t i = 0; i < JointCount; ++i) {
+            const float offset = network_interface_ == "lo" ? 0.0f : default_joint_pos_offset_[i];
+            stand_pos[i] = metadata_.default_pos[i] + offset;
+            if (!std::isfinite(stand_pos[i]))
+                throw std::runtime_error("Non-finite effective default joint position at index " + std::to_string(i));
+        }
         for (size_t i = 0; i < JointCount; ++i) {
             if (std::abs(metadata_.stiffness[i] - metadata_.stiffness[0]) > 1e-5f ||
                 std::abs(metadata_.damping[i] - metadata_.damping[0]) > 1e-5f)
@@ -162,7 +169,8 @@ public:
     const JointValues& lastPolicyOutput() const { return last_output_; }
 
 private:
-    std::string config_filename_, policy_name_, input_name_, output_name_;
+    std::string config_filename_, network_interface_, policy_name_, input_name_, output_name_;
+    JointValues default_joint_pos_offset_{};
     float cmd_lin_x_scale_{}, cmd_lin_y_scale_{}, cmd_ang_z_scale_{}, min_lin_x_{}, max_lin_x_{};
     bool params_loaded_{};
     size_t history_count_{};
