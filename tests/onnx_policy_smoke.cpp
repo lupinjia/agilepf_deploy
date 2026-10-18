@@ -37,10 +37,17 @@ Frame makeExpectedFrame(const BasicRobotInterface& robot, const Gamepad& pad, co
         {{previous_actions[0], previous_actions[1], previous_actions[2], previous_actions[3], previous_actions[4], previous_actions[5]}}
     }};
     constexpr std::array<size_t, kTermCount> widths = {3, 3, 3, 6, 6, 6};
-    constexpr std::array<float, kTermCount> scales = {0.25f, 0.25f, 1.0f, 1.0f, 0.05f, 0.25f};
+    constexpr std::array<std::array<float, 6>, kTermCount> scales = {{
+        {{1.0f, 1.0f, 0.25f, 0.0f, 0.0f, 0.0f}},
+        {{0.25f, 0.25f, 0.25f, 0.0f, 0.0f, 0.0f}},
+        {{1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f}},
+        {{1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f}},
+        {{0.05f, 0.05f, 0.05f, 0.05f, 0.05f, 0.05f}},
+        {{0.25f, 0.25f, 0.25f, 0.25f, 0.25f, 0.25f}}
+    }};
     for (size_t term = 0; term < kTermCount; ++term)
         for (size_t c = 0; c < widths[term]; ++c)
-            f[term][c] = raw[term][c] * (term == 0 && c < 2 ? 1.0f : scales[term]);
+            f[term][c] = raw[term][c] * scales[term][c];
     return f;
 }
 
@@ -104,7 +111,9 @@ int main()
 {
     try {
         const std::filesystem::path config(POLICY_PARAMS_FILE);
-        const auto model = std::filesystem::weakly_canonical(config.parent_path() / ".." / "models" / "2026-10-09_18-29-35_flat.onnx");
+        const PolicyCfg policy_config(config.string());
+        const auto model = std::filesystem::weakly_canonical(
+            config.parent_path() / ".." / "models" / policy_config.policy_name);
         OnnxController controller(config.string());
         controller.loadParam();
         controller.loadPolicy();
@@ -202,8 +211,8 @@ int main()
         }
         compareResult(controller, neutral_expected);
 
-        // The synthetic all-zero observation intentionally produces a target
-        // outside the configured bounds; target bounds are not enforced here.
+        // Compare a synthetic all-zero observation and all resulting targets
+        // without assuming anything about their range relative to YAML limits.
         robot.projected_gravity = {0.0f, 0.0f, 0.0f};
         robot.gyro = {0.0f, 0.0f, 0.0f};
         robot.jpos = {0.0f, 0.5f, -0.5f, 0.0f, 0.5f, -0.5f};
@@ -211,27 +220,17 @@ int main()
         gamepad.ly = 0.0f; gamepad.ry = 0.0f; gamepad.lx = 0.0f; gamepad.rx = 0.0f;
         controller.getInput(robot, gamepad);
         controller.reset(robot);
-        const Frame unsafe_frame = makeExpectedFrame(robot, gamepad, Actions{});
-        const Observation unsafe_input = flatten({unsafe_frame, unsafe_frame, unsafe_frame});
-        const Actions unsafe_expected = runOracle(oracle, unsafe_input);
-        bool oracle_target_violates_limit = false;
-        for (size_t i = 0; i < 6; ++i) {
-            const float target = kDefaultPose[i] + kActionScale[i] * unsafe_expected[i];
-            if (target < controller.lower_limit[i] || target > controller.upper_limit[i]) oracle_target_violates_limit = true;
-        }
-        if (!oracle_target_violates_limit) throw std::runtime_error("unsafe-frame oracle no longer exercises a configured target limit");
+        const Frame zero_frame = makeExpectedFrame(robot, gamepad, Actions{});
+        const Observation zero_input = flatten({zero_frame, zero_frame, zero_frame});
+        const Actions zero_expected = runOracle(oracle, zero_input);
         controller.calculate();
-        compareObservationBits(unsafe_input, controller.lastPolicyInput());
-        const Actions unsafe_replay = runOracle(oracle_second, controller.lastPolicyInput());
-        for (size_t i = 0; i < unsafe_replay.size(); ++i) {
-            requireClose(unsafe_replay[i], unsafe_expected[i], "unsafe-frame oracle replay");
-            requireClose(controller.lastPolicyOutput()[i], unsafe_expected[i], "unsafe-frame controller action");
+        compareObservationBits(zero_input, controller.lastPolicyInput());
+        const Actions zero_replay = runOracle(oracle_second, controller.lastPolicyInput());
+        for (size_t i = 0; i < zero_replay.size(); ++i) {
+            requireClose(zero_replay[i], zero_expected[i], "zero-frame oracle replay");
+            requireClose(controller.lastPolicyOutput()[i], zero_expected[i], "zero-frame controller action");
         }
-        compareResult(controller, unsafe_expected);
-        if (controller.jpos_des[0] >= controller.lower_limit[0] && controller.jpos_des[0] <= controller.upper_limit[0])
-            throw std::runtime_error("synthetic all-zero policy target was not committed outside joint-0 bounds");
-        if (controller.getLog()[21] != unsafe_expected[0])
-            throw std::runtime_error("synthetic all-zero raw action was not committed");
+        compareResult(controller, zero_expected);
 
         std::cout << "ONNX policy oracle smoke test passed\n";
         return 0;

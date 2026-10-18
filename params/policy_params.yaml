@@ -1,4 +1,4 @@
-policy_name: "2026-10-09_18-29-35_flat.onnx"
+policy_name: "2026-10-18_17-05-42_flat.onnx"
 dt: 0.02
 stand_kp: 60.0
 stand_kd: 3.0

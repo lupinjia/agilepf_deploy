@@ -247,18 +247,20 @@ private:
             split(metadata_string("onnx_input_shapes"), ';') != std::vector<std::string>{"1.000", "81.000"} ||
             split(metadata_string("onnx_output_shapes"), ';') != std::vector<std::string>{"1.000", "6.000"})
             throw std::runtime_error("Unsupported ONNX input/output name or shape metadata");
-        if (parseNumber(metadata_string("obs_group.actor.history_length"), "history_length") != 3.f ||
-            metadata_string("obs_group.actor.flatten_history_dim") != "True")
-            throw std::runtime_error("Unsupported actor history configuration in ONNX metadata");
-        const auto terms = split(metadata_string("obs_group.actor.term_names"), ',');
+        // onnx_input_groups="actor" names the training group; exported term
+        // metadata is namespaced by the graph input name, which is "obs".
+        if (parseNumber(metadata_string("obs_group.obs.history_length"), "obs history_length") != 3.f ||
+            metadata_string("obs_group.obs.flatten_history_dim") != "True")
+            throw std::runtime_error("Unsupported obs history configuration in ONNX metadata");
+        const auto terms = split(metadata_string("obs_group.obs.term_names"), ',');
         const std::array<std::string, 6> expected_terms = {"command", "base_ang_vel", "projected_gravity", "joint_pos", "joint_vel", "actions"};
         if (terms.size() != TermCount || !std::equal(terms.begin(), terms.end(), expected_terms.begin()))
-            throw std::runtime_error("Unsupported actor term names/order in ONNX metadata");
-        const auto histories = split(metadata_string("obs_group.actor.term_history_lengths"), ',');
+            throw std::runtime_error("Unsupported obs term names/order in ONNX metadata");
+        const auto histories = split(metadata_string("obs_group.obs.term_history_lengths"), ',');
         if (histories.size() != TermCount) throw std::runtime_error("Expected six term_history_lengths");
         for (const auto& item : histories) if (parseNumber(item, "term_history_lengths") != 3.f) throw std::runtime_error("Each supported term history length must be 3");
-        const auto clip_groups = split(metadata_string("obs_group.actor.term_clips"), ',');
-        const auto scale_groups = split(metadata_string("obs_group.actor.term_scales"), ',');
+        const auto clip_groups = split(metadata_string("obs_group.obs.term_clips"), ',');
+        const auto scale_groups = split(metadata_string("obs_group.obs.term_scales"), ',');
         if (clip_groups.size() != TermCount || scale_groups.size() != TermCount) throw std::runtime_error("Term clips/scales must each contain six terms");
         const std::array<size_t, 6> widths = {3, 3, 3, 6, 6, 6};
         for (size_t term = 0; term < TermCount; ++term) {

@@ -2,7 +2,7 @@
 
 ## Dependencies
 
-- legged_sdk
+- [legged_sdk](https://github.com/lupinjia/legged_sdk)
 - yaml-cpp
 - ONNX Runtime (headers and x86_64/arm64 libraries are vendored in `third_party/onnxruntime`)
 
