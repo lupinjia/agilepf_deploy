@@ -1,3 +1,13 @@
+/**
+ * @file main.cpp
+ * @author lupinjia (jason_1120202397@163.com)
+ * @brief Main function of the deployment framework.
+ * @version 0.1
+ * @date 2026-10-19
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ */
 #include <iostream>
 #include <sstream>
 #include <fstream>
@@ -50,9 +60,9 @@ int main(int argc, char const *argv[])
     OnnxController* user_ctrl = new OnnxController(config_file_dir, interface_name);
     RobotController *robot_controller = new RobotController(log_folder, 
                                     user_ctrl, domain_id, interface_name);
-    // load parameter from .json file
+    // load parameter from yaml file
     robot_controller->loadParam();
-    // 加载神经网络模型
+    // load NN policy
     robot_controller->loadPolicy();
 
     // output information
@@ -60,7 +70,7 @@ int main(int argc, char const *argv[])
     spdlog::info("Press Enter to continue...");
     std::cin.ignore();
 
-    // 开启外设通信
+    // initialize DDS communication
     robot_controller->initDDSPubSub();
     std::chrono::milliseconds duration(1000); // 1000ms, wait for peripheral threads to start
     std::this_thread::sleep_for(duration);

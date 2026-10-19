@@ -1,3 +1,15 @@
+/**
+ * @file robot_controller.hpp
+ * @author lupinjia (jason_1120202397@163.com)
+ * @brief RobotController class. This class is the outside interface that incorporates every module of the framework,
+ *        including state machine, robot interface, gamepad, user controller, and DDS communication.
+ *        The class is responsible for initializing the framework, loading parameters, and running the robot control loop.
+ * @version 0.1
+ * @date 2026-10-19
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ */
 #ifndef ROBOT_CONTROLLER_HPP
 #define ROBOT_CONTROLLER_HPP
 
@@ -40,12 +52,28 @@ using namespace legged::common;
 #define TOPIC_LOWCMD "rt/lowcmd"
 #define TOPIC_LOWSTATE "rt/lowstate"
 
-// RobotController为一个框架, 将有限状态机整体的逻辑具象化为一个类
+/**
+ * @brief RobotController class.
+ * 
+ */
 class RobotController
 {
 public:
+    /**
+     * @brief Construct a new RobotController object.
+     * 
+     * @param ctrl User controller.
+     */
     RobotController(BasicUserController* ctrl) : ctrl(ctrl) {}
 
+    /**
+     * @brief Construct a new RobotController object.
+     * 
+     * @param log_folder Path of log folder.
+     * @param user_ctrl User controller.
+     * @param domain_id Domain ID.
+     * @param interface_name Interface name.
+     */
     RobotController(fs::path &log_folder, BasicUserController* user_ctrl,
                     int domain_id, std::string interface_name) :
         ctrl(user_ctrl), domain_id_(domain_id), interface_name_(interface_name)
@@ -68,19 +96,32 @@ public:
         message_logger = spdlog::basic_logger_mt("message_logger", log_folder / "message_log.txt");
         // spdlog::set_default_logger(logger);
 
+        // initialize lowlevel command
         initLowCmd();
     }
 
+    /**
+     * @brief Load parameter from yaml file.
+     * 
+     */
     void loadParam()
     {
         ctrl->loadParam();
     }
 
+    /**
+     * @brief Load NN policy.
+     * 
+     */
     void loadPolicy()
     {
         ctrl->loadPolicy();
     }
 
+    /**
+     * @brief Initialize DDS communication.
+     * 
+     */
     void initDDSPubSub()
     {
         // init time variables
@@ -97,6 +138,10 @@ public:
         
     }
 
+    /**
+     * @brief Start control thread.
+     * 
+     */
     void startControl()
     {
         // waiting for gamepad command to start the control thread
@@ -159,7 +204,11 @@ protected:
 
 private:
         
-    // 500Hz
+    /**
+     * @brief Handle low state message. This function is executed at 500Hz.
+     * 
+     * @param msg Low state message.
+     */
     void lowStateMessageHandler(const void* msg)
     {
         low_state = *(legged::idl::agilepf::LowState*)msg;
@@ -195,19 +244,26 @@ private:
                 low_state_period.clear();
             }
         #endif
-        // process low state
+        // process low state message
         {
+            // lock state_mutex
             std::lock_guard<std::mutex> lock(state_mutex);
             robot_interface.updateLowState(low_state);
         }
     }
 
+    /**
+     * @brief Interpret gamepad data.
+     * 
+     */
     void intepretGamePad()
     {
         gamepad.update(low_state.joystick_data());
     }
-
-    // 500Hz
+    /**
+     * @brief Handle low command message. This function is executed at 500Hz.
+     * 
+     */
     void lowCmdwriteHandler()
     {
         #ifdef PRINT_DEBUG
@@ -242,6 +298,10 @@ private:
         }
     }
 
+    /**
+     * @brief Initialize low level command.
+     * 
+     */
     void initLowCmd()
     {
         // initialize low_cmd msg
@@ -249,6 +309,10 @@ private:
         low_cmd.tail() = {0xEE, 0xFF};
     }
 
+    /**
+     * @brief Set low level command. Using the value in robot interface.
+     * 
+     */
     void set_cmd()
     {
         for(int i = 0; i < 6; i++)
@@ -261,6 +325,10 @@ private:
         }
     }
 
+    /**
+     * @brief Start to send low level command.
+     * 
+     */
     void startSendCmd()
     {
         // save starting time
@@ -271,7 +339,11 @@ private:
             4, SCHED_FIFO, 99);
     }
 
-   void updateStateMachine()
+    /**
+     * @brief Update state machine.
+     * 
+     */
+    void updateStateMachine()
     {
         // B -> Stand
         // A -> CTRL
@@ -301,11 +373,15 @@ private:
         }
     }
 
-    // 50Hz
+    /**
+     * @brief Control step. This function is executed at 50Hz.
+     * 
+     */
     void controlStep()
     {
       try
       {
+        // interpret gamepad data at 50Hz, avoiding multiple presses
         intepretGamePad();
         // update current state
         updateStateMachine();
