@@ -1,18 +1,18 @@
-policy_name: "2026-10-18_17-05-42_flat.onnx"
+policy_name: "2026-10-20_15-27-06_flat.onnx"
 dt: 0.02
 stand_kp: 60.0
 stand_kd: 3.0
 
-cmd_lin_x_scale: 1.0
+cmd_lin_x_scale: 0.8
 cmd_lin_y_scale: 0.4
-cmd_ang_z_scale: 1.0
+cmd_ang_z_scale: 0.8
 min_lin_x: -0.5
-max_lin_x: 1.0
+max_lin_x: 0.8
 rpy_offset_increment: 0.01
 
 # Radians; order: left hip, thigh, calf, then right hip, thigh, calf.
 # Applied only when the selected network interface is not "lo".
-default_joint_pos_offset: [-0.02, 0.02, 0.0, -0.02, 0.02, 0.0]
+default_joint_pos_offset: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 # The ONNX metadata default pose [0, 0.5, -0.5, 0, 0.5, -0.5] is within
 # the policy target bounds below. The historical start pose is retained as-is;
