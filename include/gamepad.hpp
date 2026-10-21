@@ -1,13 +1,32 @@
+/**
+ * @file gamepad.hpp
+ * @author lupinjia (jason_1120202397@163.com)
+ * @brief Gamepad class for processing joystick data from the DDS topic.
+ * @version 0.1
+ * @date 2026-10-21
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ */
 #pragma once
 
 #include <cmath>
 #include <idl/agilepf/JoystickData/JoystickData.hpp>
 
+/**
+ * @brief Button class, defining 3 states of a button (pressed, on_press, on_release).
+ * 
+ */
 class Button
 {
 public:
     Button() {}
 
+    /**
+     * @brief Update the button state.
+     * 
+     * @param state The new state of the button.
+     */
     void update(bool state)
     {
         on_press = state ? state != pressed : false;
@@ -20,11 +39,20 @@ public:
     bool on_release = false;
 };
 
+/**
+ * @brief Gamepad class, processing joystick data.
+ * 
+ */
 class Gamepad
 {
 public:
     Gamepad() {}
 
+    /**
+     * @brief Update the gamepad state.
+     * 
+     * @param joystick_data The joystick data to process.
+     */
     void update(const legged::idl::agilepf::JoystickData &joystick_data)
     {
         lx = lx * (1 - smooth) + (std::fabs(joystick_data.left_stick_x()) < dead_zone ? 0.0 : joystick_data.left_stick_x()) * smooth;
@@ -46,9 +74,13 @@ public:
         left.update(joystick_data.left_button());
     }
 
+    // left stick x axis
     float lx = 0.;
+    // right stick x axis
     float rx = 0.;
+    // right stick y axis
     float ry = 0.;
+    // left stick y axis
     float ly = 0.;
 
     float smooth = 0.03;

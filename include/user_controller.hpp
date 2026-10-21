@@ -1,3 +1,14 @@
+/**
+ * @file user_controller.hpp
+ * @author lupinjia (jason_1120202397@163.com)
+ * @brief User controller interface.
+ *        User controllers are places where users define their own control strategies, used in CTRL state.
+ * @version 0.1
+ * @date 2026-10-21
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ */
 #ifndef __USER_CONTROLLER_HPP__
 #define __USER_CONTROLLER_HPP__
 
@@ -15,6 +26,11 @@
 #include "cfg.hpp"
 #include "gamepad.hpp"
 
+/**
+ * @brief Basic user controller interface.
+ *        This class is a base class for all user controllers. 
+ *        It defines the basic methods that all user controllers must implement.
+ */
 class BasicUserController
 {
 public:
@@ -32,6 +48,11 @@ public:
     std::array<float, 6> start_pos{}, stand_pos{}, jpos_des{}, lower_limit{}, upper_limit{};
 };
 
+/**
+ * @brief ONNX user controller.
+ *        This class is a derived class for BasicUserController. 
+ *        It implements the ONNX user controller, which is used to control the robot using ONNX models.
+ */
 class OnnxController final : public BasicUserController
 {
     static constexpr size_t JointCount = 6;

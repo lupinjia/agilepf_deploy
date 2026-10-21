@@ -1,3 +1,15 @@
+/**
+ * @file robot_interface.hpp
+ * @author lupinjia (jason_1120202397@163.com)
+ * @brief Robot interface class, responsible for following functions:
+ *        1. Receiving low-level state from the DDS topic and converting it to member variables.
+ *        2. Storing commands for controlling the robot.
+ * @version 0.1
+ * @date 2026-10-21
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ */
 #ifndef __ROBOT_INTERFACE_HPP__
 #define __ROBOT_INTERFACE_HPP__
 
@@ -7,6 +19,10 @@
 #include <legged_sdk/idl/agilepf/LowState/LowState.hpp>
 #include <common/mathTools.h>
 
+/**
+ * @brief Basic robot interface class.
+ * 
+ */
 class BasicRobotInterface
 {
 public:
@@ -25,6 +41,11 @@ public:
     rpy_offset.fill(0.);
   }
 
+  /**
+   * @brief Update low-level state from the DDS topic.
+   * 
+   * @param low_state Low-level state from the DDS topic.
+   */
   void updateLowState(legged::idl::agilepf::LowState &low_state)
   {
     // imu
@@ -58,6 +79,10 @@ public:
   std::array<float, 3> rpy_offset;
 
 private:
+  /**
+   * @brief Update projected gravity from the quaternion.
+   * 
+   */
   inline void updateProjectedGravity()
   {
     // inverse quat

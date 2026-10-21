@@ -1,3 +1,14 @@
+/**
+ * @file cfg.hpp
+ * @author lupinjia (jason_1120202397@163.com)
+ * @brief Configuration struct for the policy. 
+ *        This struct is used to store the configuration parameters of the policy, specified in the YAML file.
+ * @version 0.1
+ * @date 2026-10-21
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ */
 #pragma once
 
 #include <array>
@@ -6,8 +17,17 @@
 #include <string>
 #include <yaml-cpp/yaml.h>
 
+/**
+ * @brief Configuration struct for the policy.
+ * 
+ */
 struct PolicyCfg
 {
+    /**
+     * @brief Construct a new PolicyCfg object.
+     * 
+     * @param filename The filename of the policy YAML file.
+     */
     explicit PolicyCfg(const std::string& filename)
     {
         const auto yaml = YAML::LoadFile(filename);
@@ -50,6 +70,14 @@ struct PolicyCfg
     std::array<float, 6> start_pos{}, lower_limit{}, upper_limit{}, default_joint_pos_offset{};
 
 private:
+    /**
+     * @brief Read an array of six float values from a YAML node.
+     * 
+     * 
+     * @param node The YAML node to read from.
+     * @param out The array to store the values.
+     * @param name The name of the array in the YAML file.
+     */
     static void readArray(const YAML::Node& node, std::array<float, 6>& out, const char* name)
     {
         if (!node || !node.IsSequence() || node.size() != out.size())

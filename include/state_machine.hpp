@@ -1,8 +1,28 @@
+/**
+ * @file state_machine.hpp
+ * @author lupinjia (jason_1120202397@163.com)
+ * @brief Simple state machine class for a robot.
+ * @version 0.1
+ * @date 2026-10-21
+ * 
+ * @copyright Copyright (c) 2026
+ * 
+ */
 #ifndef STATE_MACHINE_HPP
 #define STATE_MACHINE_HPP
 
 #include "user_controller.hpp"
 
+/**
+ * @brief State enum for the robot state machine.
+ * 
+ * @details The robot machine can be in one of the following states:
+ *          1. DAMPING: The robot is in a damping state, waiting for the fault to be recovered.
+ *          2. STAND: The robot is in a standing state, ready to move.
+ *          3. CTRL: The robot is in a control state, following the desired trajectory.
+ *          4. TEST: The robot is in a test state, conducting some kind of test.
+ *          5. ZERO_TORQUE: The robot is in a zero torque state, waiting for the fault to be recovered.
+ */
 enum class STATES
 {
   DAMPING = 0,
@@ -12,6 +32,11 @@ enum class STATES
   ZERO_TORQUE = 4
 };
 
+/**
+ * @brief Simple state machine class for a robot.
+ * 
+ * @details This class is used to manage the state of the robot, and to transition between different states.
+ */
 class SimpleStateMachine
 {
 public:
@@ -21,10 +46,10 @@ public:
   }
 
   /**
-   * @brief  set state to damping
-   * 
-   * @return true 
-   * @return false 
+   * @brief Set state to damping.
+   * @details If the robot is in a fault state, the transition will be rejected. 
+   * @return true If the transition is successful.
+   * @return false Otherwise.
    */
   bool damp()
   {
@@ -36,6 +61,12 @@ public:
     return true;
   }
 
+  /**
+   * @brief Set state to standing.
+   * @details If the robot is in a fault state, the transition will be rejected. 
+   * @return true If the transition is successful.
+   * @return false Otherwise.
+   */
   bool stand()
   {
     if(state == STATES::DAMPING)
@@ -50,6 +81,12 @@ public:
     }
   }
 
+  /**
+   * @brief Set state to control.
+   * @details If the robot is in a fault state, the transition will be rejected. 
+   * @return true If the transition is successful.
+   * @return false Otherwise.
+   */
   bool ctrl()
   {
     if((state == STATES::DAMPING || state == STATES::STAND) &&
@@ -65,6 +102,12 @@ public:
     }
   }
 
+  /**
+   * @brief Set state to test.
+   * @details If the robot is in a fault state, the transition will be rejected. 
+   * @return true If the transition is successful.
+   * @return false Otherwise.
+   */
   bool test()
   {
     if(state == STATES::STAND || state == STATES::DAMPING)
@@ -78,6 +121,12 @@ public:
     }
   }
 
+  /**
+   * @brief Set state to zero torque.
+   * @details This is the fall-back state when robot is in a fault state.
+   * @return true If the transition is successful.
+   * @return false Otherwise.
+   */
   bool zeroTorque()
   {
     state = STATES::ZERO_TORQUE;
@@ -88,6 +137,10 @@ public:
     return true;
   }
 
+  /**
+   * @brief Latch fault.
+   * @details This method is used to set the fault flag to true, and transition the robot to the ZERO_TORQUE state.
+   */
   void latchFault() noexcept
   {
     fault_latched = true;
@@ -95,6 +148,11 @@ public:
     state = STATES::ZERO_TORQUE;
   }
 
+  /**
+   * @brief Processing of standing state.
+   * 
+   * @param ctrl User controller object.
+   */
   void standing(BasicUserController &ctrl)
   {
     // calc percent

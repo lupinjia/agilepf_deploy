@@ -44,8 +44,6 @@ The correspondence between joystick buttons and robot states is as follows:
 
 > [!warning] If the robot shows any abnormal behavior, please enter damping or zero torque to avoid further damage.
 
-### Adjust 
-
 ### Data Log
 
 We have two log files:
@@ -65,3 +63,7 @@ Then, you need to run the application with `sudo` privilege:
 sudo -i
 ./agilepf_deploy network_interface_name
 ```
+
+## Acknowledgments
+
+- [unitree_sdk2](https://github.com/unitreerobotics/unitree_sdk2/tree/main)

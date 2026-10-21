@@ -403,16 +403,14 @@ private:
             robot_interface.rpy_offset.at(1) += ctrl->rpy_offset_increment;
         }
 
-        // select control modes according to the state machine
         auto start = std::chrono::high_resolution_clock::now();
-        // 读取状态信息
+        // get input from gamepad and robot_interface
         {
             std::lock_guard<std::mutex> lock(state_mutex);
             ctrl->getInput(robot_interface, gamepad);
         }
         
-        // 根据状态判断具体执行哪个状态下的处理函数
-        // 
+        // select control modes according to the state machine
         if(state_machine.state == STATES::STAND)
         {
             standing();
@@ -435,6 +433,7 @@ private:
             }
         }
 
+        // measure compute time
         auto stop = std::chrono::high_resolution_clock::now();
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
         compute_time.push_back(duration.count() / 1000.); // us->ms
@@ -448,6 +447,7 @@ private:
         // write log
         writeLog(duration.count() / 1000.);
 
+        // print performance info
         if (compute_time.size() == 50)
         {
             float sum = 0;
@@ -478,14 +478,18 @@ private:
       }
       catch(const std::exception& error)
       {
-        tripControlFault(error.what());
+        tripControlFault(error.what()); // catch any exception
       }
       catch(...)
       {
-        tripControlFault("unknown exception");
+        tripControlFault("unknown exception"); // catch any exception
       }
     }
 
+    /**
+     * @brief Trip control fault. This function is called when a control fault is detected.
+     * @param reason The reason for the fault.
+     */
     void tripControlFault(const char* reason) noexcept
     {
         const bool first_fault = !control_fault_latched;
@@ -521,6 +525,11 @@ private:
         }
     }
 
+    /**
+     * @brief Write log to file.
+     * 
+     * @param computation_time The computation time in milliseconds.
+     */
     void writeLog(float computation_time)
     {
         if (robot_state_log_file.is_open())
@@ -538,9 +547,10 @@ private:
     }
 
     /**
-     * @brief 站立状态回调函数
-     * @note  进入状态时调用一次, 用于进入站立状态的初始化工作
-    */
+     * @brief Callback function for STANDING state.
+     * This function is called when the robot enters the STANDING state.
+     * It is used to initialize the robot's position and velocity.
+     */
     void standCallback()
     {
         {
@@ -555,8 +565,9 @@ private:
     }
 
     /**
-        * @brief 控制状态回调函数
-        * @note  进入状态时调用一次, 用于进入控制状态的初始化工作
+      * @brief Callback function for CONTROL state.
+      * This function is called when the robot enters the CONTROL state.
+      * It is used to initialize the robot's position and velocity.
     */
     void ctrlCallback()
     {
@@ -571,8 +582,7 @@ private:
     }
 
     /**
-    * @brief processing function for DAMPING state
-    * 
+    * @brief Processing function for DAMPING state.
     */
     void damping(float kd = 3.0)
     {
@@ -584,6 +594,9 @@ private:
         robot_interface.tau_ff.fill(0.);
     }
 
+    /**
+     * @brief Processing function for ZERO_TORQUE state.
+     */
     void zeroTorque()
     {
         robot_interface.jpos_des.fill(0.);
@@ -593,6 +606,9 @@ private:
         robot_interface.tau_ff.fill(0.);
     }
 
+    /**
+     * @brief Processing function for STANDING state.
+     */
     void standing()
     {
         state_machine.standing(*ctrl);
@@ -602,6 +618,11 @@ private:
         }
     }
 
+    /**
+     * @brief Processing function for CONTROL state.
+     * 
+     * @param send_cmd Whether to send the command to the robot.
+     */
     void userControlStep(bool send_cmd = false)
     {
         ctrl->calculate();
@@ -615,6 +636,12 @@ private:
         }
     }
 
+    /**
+     * @brief Check if the robot has terminated.
+     * 
+     * @return true If the robot has terminated.
+     * @return false If the robot has not terminated.
+     */
     bool CheckTermination()
     {
         // if (robot_interface.projected_gravity.at(2) > -0.2)
